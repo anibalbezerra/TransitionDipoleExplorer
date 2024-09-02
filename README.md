@@ -81,7 +81,7 @@ The running of Quantum Espresso should follow the standard process:
    - Ensure to be using norm-conserving pseudo-potentials, since the next step is only built over such kind of pseudo-potential.
    - Turn off auto-symmetrization by setting `NOSYM` true.
    - Finally use a uniform k-point grid with all weights equal to each other
-      - We wrote a simple Python tool based on ASE library to generate the uniform k-point grid - it is in `Tools` directory.
+      - We wrote a simple Python tool based on ASE library to generate the uniform k-point grid - it is in `Tools` directory [Uniform_Kgrid](https://github.com/anibalbezerra/TransitionDipoleExplorer/blob/master/Tools/UNIFORMKGRID_for_epsilonx.py).
       - You can use tools like [seek-path](https://www.materialscloud.org/work/tools/seekpath) to get the reciprocal vectors and generate the uniformly spaced grid).
 * Do non-self-consistent-field running (since optical properties require a dense grid, check for convergence with both energy threshould and k-point grid density).
 * Do projected density of states calculation using `projwfc.x` code (use the argument fillpdos to write the projections of the Khom-Sham states over the atomic states). The calculation will generate the output file `${prefix}.projwfc.out` that will be used latter.
