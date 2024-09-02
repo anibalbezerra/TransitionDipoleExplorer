@@ -1,0 +1,6 @@
+&PROJWFC
+  prefix= 'al',
+  outdir= './tmp/',
+  filpdos= 'al_pdos.dat',
+  filproj= 'al_proj.dat'
+/

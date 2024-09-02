@@ -1,0 +1,14 @@
+&inputpp
+outdir='./tmp/'
+prefix='al'
+calculation='eps'
+/
+&energy_grid
+smeartype='gauss'
+intersmear=0.136d0
+intrasmear=0.0d0
+wmax=30.0d0
+wmin=0.0d0
+nw=600
+shift=0.0d0
+/
