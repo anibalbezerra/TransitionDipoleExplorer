@@ -155,3 +155,14 @@ It also uses the variables `initial_state` and `final_state` to determine wich s
 * The multiprocessing library can be used for parallel processing (not explicitly shown in the example).
 * The verbosity level can be set to "debug" or "info" to control the amount of information printed during execution.
 * The path to save figures can be customized by setting the path2save_Figs argument.
+
+### Disclaimer
+
+1. As a tool that runs over all Khom Sham states, even its execution being paralellized, the Analyzer could take a long time to be executed. It all depends on the k-points grid density, the number of atoms within the structure, the number of bands evaluated using `pw.x` and the number of atomic orbitals defined by the pseudo-potentials.
+2. This is only a tool to get the projections of the optical response over the atomic orbitals. The physic's aspect of the analysis should be done by the researcher.
+3. Even `epsilon.x` evaluating both inter and intraband transitions (the last only for metals), the present code was implemented only for the interband transitions. In a next version the intraband contribution should be added.
+4.  For more information about the group behind the scenes, plese visit [LDFT](https://www.unifal-mg.edu.br/ldft).
+
+# HAVE FUN!  
+
+
