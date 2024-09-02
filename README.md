@@ -1,4 +1,4 @@
-# TransitionDipoleExplorer: A Tool for Analyzing Quantum Espresso Optical Data
+# TransitionDipoleExplorer: A Tool for Analyzing Quantum Espresso's Optical Data
 
 ## Motivation: 
 
