@@ -23,13 +23,6 @@ Quantum Espresso is a powerful software package for electronic structure calcula
 **Efficient Analysis**: Streamline the process of data visualization and interpretation, saving time and effort.
 **Data-Driven Decision Making**: Make informed decisions based on quantitative analysis of transition dipole data.
 
-### Target Audience:
-
-Materials scientists
-Physicists
-Computational chemists
-Researchers studying electronic properties of materials
-
 TransitionDipoleExplorer is a valuable tool for researchers working with Quantum Espresso data. It empowers users to extract meaningful information from their simulations and gain a deeper understanding of the electronic properties of materials.
 
 ---
@@ -37,7 +30,7 @@ TransitionDipoleExplorer is a valuable tool for researchers working with Quantum
 
 Transition Dipole Explorer relies on two main Python codes:
 
-1. projWGC_parser
+1. projWFC_parser
 2. projectionAnalyzer
 
 In what follows we have the detailided description of the two codes.
