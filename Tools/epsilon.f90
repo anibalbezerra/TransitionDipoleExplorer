@@ -277,6 +277,64 @@ CONTAINS
 END MODULE eps_writer_binary
 
 
+MODULE eps_write_proj_binary
+  IMPLICIT NONE
+  PRIVATE
+  PUBLIC :: eps_writetofile_proj_binary
+
+CONTAINS
+
+  SUBROUTINE eps_writetofile_proj_binary(namein, nw, wgrid, nbnd, var)
+    USE kinds,  ONLY : DP
+    USE io_files, ONLY : prefix
+    USE io_global,   ONLY : stdout, ionode
+
+    IMPLICIT NONE
+    CHARACTER(LEN=*),   INTENT(IN)   :: namein
+    INTEGER,   INTENT(IN)    :: nw, nbnd
+    REAL(DP), DIMENSION(3, nw, nbnd, nbnd), INTENT(IN) :: var
+    REAL(DP),           INTENT(IN)           :: wgrid(nw)
+
+    CHARACTER(256) :: str
+    INTEGER  :: iux, dir, iw
+    CHARACTER(30)   :: dir_str
+
+    iux = 423
+
+    IF(ionode) WRITE(stdout,"(5x,a)") "Writing direction-resolved Eps to binary files"
+
+    ! Loop over 3 directions (x, y, z)
+    do dir = 1, 3
+      select case (dir)
+        case (1)
+          dir_str = 'x'
+        case (2)
+          dir_str = 'y'
+        case (3)
+          dir_str = 'z'
+        case default
+          IF(ionode) WRITE(stdout,"(5x,a)") 'Unexpected value for direction'
+      end select
+
+      ! Construct file name for each direction
+      str = TRIM(namein) // "_" // TRIM(prefix) // "_" // TRIM(dir_str) // ".bin"
+      OPEN(UNIT=iux, FILE=TRIM(str), STATUS='replace', FORM='UNFORMATTED', ACCESS='stream')
+
+      ! Write the two integers as headers
+      WRITE(iux) nw
+      WRITE(iux) nbnd
+
+      ! Write the entire 3D block for the current direction in one go
+      WRITE(iux) wgrid
+      WRITE(iux) var(dir, :, :, :)
+
+      CLOSE(iux)
+
+    end do
+
+  END SUBROUTINE eps_writetofile_proj_binary
+
+END MODULE eps_write_proj_binary
 
 
 
@@ -489,6 +547,7 @@ SUBROUTINE eps_calc ( intersmear,intrasmear, nbndmin, nbndmax, shift, metalcalc 
   USE grid_module,          ONLY : alpha, focc, full_occ, nw, wgrid, grid_destroy
   USE eps_writer,           ONLY : eps_writetofile
   USE eps_writer_binary,    ONLY : eps_writetofile_binary
+  USE eps_write_proj_binary, ONLY : eps_writetofile_proj_binary
   USE mp_pools,             ONLY : inter_pool_comm
   USE mp,                   ONLY : mp_sum
   !
@@ -506,11 +565,14 @@ SUBROUTINE eps_calc ( intersmear,intrasmear, nbndmin, nbndmax, shift, metalcalc 
   INTEGER       :: i, ik, iband1, iband2,is
   INTEGER       :: iw, iwp, ierr
   REAL(DP)      :: etrans, const, w, renorm(3)
-  CHARACTER(128):: desc(5), desc2
+  CHARACTER(128):: desc(7), desc2
   !
   REAL(DP),    ALLOCATABLE :: epsr(:,:), epsi(:,:), epsrc(:,:,:), epsic(:,:,:)
+
+  REAL(DP),    ALLOCATABLE :: epsr_intra(:,:), epsi_intra(:,:)
+
   REAL(DP),    ALLOCATABLE :: ieps(:,:), eels(:,:), iepsc(:,:,:), eelsc(:,:,:)
-  REAL(DP),    ALLOCATABLE :: dipole(:,:,:), K_dipole_aux(:,:,:,:)
+  REAL(DP),    ALLOCATABLE :: dipole(:,:,:), K_dipole_aux(:,:,:,:), proj_epsr(:,:,:,:), proj_epsi(:,:,:,:)
   COMPLEX(DP), ALLOCATABLE :: dipole_aux(:,:,:)
   !
   REAL(DP) , EXTERNAL :: w0gauss
@@ -531,8 +593,16 @@ SUBROUTINE eps_calc ( intersmear,intrasmear, nbndmin, nbndmax, shift, metalcalc 
     ALLOCATE( K_dipole_aux(nks, 3, nbnd, nbnd), STAT=ierr )
     IF (ierr/=0) CALL errore('epsilon','allocating k resolved dipole_aux', abs(ierr) )
     !
+    ALLOCATE( proj_epsr(3,nw,nbnd,nbnd), proj_epsi(3,nw,nbnd,nbnd), STAT=ierr )
+    IF (ierr/=0) CALL errore('epsilon','allocating KS resolved espr and epsi', abs(ierr) )
+    !
     ALLOCATE( epsr( 3, nw), epsi( 3, nw), eels( 3, nw), ieps(3,nw ), STAT=ierr )
     IF (ierr/=0) CALL errore('epsilon','allocating eps', abs(ierr))
+    !
+    IF (metalcalc) THEN
+      ALLOCATE( epsr_intra( 3, nw), epsi_intra( 3, nw), STAT=ierr )
+      IF (ierr/=0) CALL errore('epsilon','allocating eps', abs(ierr))
+    ENDIF
 
     !
     ! initialize response functions
@@ -541,11 +611,20 @@ SUBROUTINE eps_calc ( intersmear,intrasmear, nbndmin, nbndmax, shift, metalcalc 
     epsi(:,:)  = 0.0_DP
     ieps(:,:)  = 0.0_DP
 
+    proj_epsr(:,:,:,:) = 0.0_DP
+    proj_epsi(:,:,:,:) = 0.0_DP
+
+    IF (metalcalc) THEN
+      epsr_intra(:,:)  = 0.0_DP
+      epsi_intra(:,:)  = 0.0_DP
+    ENDIF
+
     IF(ionode) WRITE(stdout,'(/5x, a)') "System Numerology"
     IF(ionode) WRITE(stdout,'(5x, a, I3)') "nbnd = ", nbnd
     IF(ionode) WRITE(stdout,'(5x, a, I3)') "nbndmin=", nbndmin
     IF(ionode) WRITE(stdout,'(5x, a, I3)') "nbndmax=", nbndmax
     IF(ionode) WRITE(stdout,'(5x, a, I5)') "nks=",  nks
+    IF(ionode) WRITE(stdout,'(5x, a, I5)') "nw=",  nw
 
     !
     ! main kpt loop
@@ -593,8 +672,17 @@ SUBROUTINE eps_calc ( intersmear,intrasmear, nbndmin, nbndmax, shift, metalcalc 
                             epsi(:,iw) = epsi(:,iw) + dipole(:,iband1,iband2) * intersmear * w* &
                                                     RYTOEV**3 * (focc(iband1,ik))/  &
                                                     (( (etrans**2 -w**2 )**2 + intersmear**2 * w**2 )* etrans )
+                            
+                            proj_epsi(:,iw,iband1,iband2) = proj_epsi(:,iw,iband1,iband2) + dipole(:,iband1,iband2) * intersmear * w* &
+                                                            RYTOEV**3 * (focc(iband1,ik))/  &
+                                                            (( (etrans**2 -w**2 )**2 + intersmear**2 * w**2 )* etrans )
 
                             epsr(:,iw) = epsr(:,iw) + dipole(:,iband1,iband2) * RYTOEV**3 * &
+                                                    (focc(iband1,ik)) * &
+                                                    (etrans**2 - w**2 ) / &
+                                                    (( (etrans**2 -w**2 )**2 + intersmear**2 * w**2 )* etrans )
+                            
+                            proj_epsr(:,iw,iband1,iband2) = proj_epsr(:,iw,iband1,iband2) + dipole(:,iband1,iband2) * RYTOEV**3 * &
                                                     (focc(iband1,ik)) * &
                                                     (etrans**2 - w**2 ) / &
                                                     (( (etrans**2 -w**2 )**2 + intersmear**2 * w**2 )* etrans )
@@ -619,9 +707,23 @@ SUBROUTINE eps_calc ( intersmear,intrasmear, nbndmin, nbndmax, shift, metalcalc 
                     epsi(:,iw) = epsi(:,iw) +  dipole(:,iband1,iband1) * intrasmear * w * &
                                  RYTOEV**2 * w0gauss((et(iband1,ik)-efermi)/degauss, ngauss) / &
                                  (( w**4 + intrasmear**2 * w**2 )*degauss ) * (0.5d0 * full_occ)
+                    epsi_intra(:,iw) = epsi_intra(:,iw) + dipole(:,iband1,iband1) * intrasmear * w * &
+                                      RYTOEV**2 * w0gauss((et(iband1,ik)-efermi)/degauss, ngauss) / &
+                                      (( w**4 + intrasmear**2 * w**2 )*degauss ) * (0.5d0 * full_occ)
+
+                    proj_epsi(:,iw,iband1,iband1) = proj_epsi(:,iw,iband1,iband1)+ dipole(:,iband1,iband1) * intrasmear * w * &
+                                                    RYTOEV**2 * w0gauss((et(iband1,ik)-efermi)/degauss, ngauss) / &
+                                                    (( w**4 + intrasmear**2 * w**2 )*degauss ) * (0.5d0 * full_occ)
+
                     epsr(:,iw) = epsr(:,iw) - dipole(:,iband1,iband1) * RYTOEV**2 * &
                                  w0gauss((et(iband1,ik)-efermi)/degauss, ngauss) * w**2 / &
                                  (( w**4 + intrasmear**2 * w**2 )*degauss ) * (0.5d0 * full_occ)
+                    epsr_intra(:,iw) = epsr_intra(:,iw) - dipole(:,iband1,iband1) * RYTOEV**2 * &
+                                 w0gauss((et(iband1,ik)-efermi)/degauss, ngauss) * w**2 / &
+                                 (( w**4 + intrasmear**2 * w**2 )*degauss ) * (0.5d0 * full_occ)
+                    proj_epsr(:,iw,iband1,iband1) = proj_epsr(:,iw,iband1,iband1)- dipole(:,iband1,iband1) * RYTOEV**2 * &
+                                                  w0gauss((et(iband1,ik)-efermi)/degauss, ngauss) * w**2 / &
+                                                  (( w**4 + intrasmear**2 * w**2 )*degauss ) * (0.5d0 * full_occ)
                 ENDDO
                 !
             ENDDO
@@ -634,6 +736,12 @@ SUBROUTINE eps_calc ( intersmear,intrasmear, nbndmin, nbndmax, shift, metalcalc 
     !
     CALL mp_sum( epsr, inter_pool_comm )
     CALL mp_sum( epsi, inter_pool_comm )
+    CALL mp_sum( proj_epsr, inter_pool_comm )
+    CALL mp_sum( proj_epsi, inter_pool_comm )
+    IF (metalcalc) THEN
+      CALL mp_sum( epsr_intra, inter_pool_comm )
+      CALL mp_sum( epsi_intra, inter_pool_comm )
+    ENDIF
 
     !
     ! impose the correct normalization
@@ -643,6 +751,14 @@ SUBROUTINE eps_calc ( intersmear,intrasmear, nbndmin, nbndmax, shift, metalcalc 
     !
     epsr(:,:) = 1.0_DP + epsr(:,:) * const
     epsi(:,:) =          epsi(:,:) * const
+
+    proj_epsr(:,:,:,:) = 1.0_DP + proj_epsr(:,:,:,:) * const
+    proj_epsi(:,:,:,:) =        + proj_epsi(:,:,:,:) * const
+
+    IF (metalcalc) THEN
+      epsr_intra(:,:) = 1.0_DP + epsr_intra(:,:) * const
+      epsi_intra(:,:) =          epsi_intra(:,:) * const
+    ENDIF
 
     !
     ! Calculation of eels spectrum
@@ -689,6 +805,8 @@ SUBROUTINE eps_calc ( intersmear,intrasmear, nbndmin, nbndmax, shift, metalcalc 
         desc(3) = "energy grid [eV]  eels components [arbitrary units]"
         desc(4) = "energy grid [eV]     ieps_x  ieps_y  ieps_z"
         desc(5) = "khom sham states"
+        desc(6) = "energy grid [eV]     epsr(intra)_x  epsr(intra)_y  epsr(intra)_z"
+        desc(7) = "energy grid [eV]     epsi(intra)_x  epsi(intra)_y  epsi(intra)_z"
         !
         CALL eps_writetofile("epsr",desc(1),nw,wgrid,3,epsr,desc2)
         CALL eps_writetofile("epsi",desc(2),nw,wgrid,3,epsi)
@@ -696,10 +814,20 @@ SUBROUTINE eps_calc ( intersmear,intrasmear, nbndmin, nbndmax, shift, metalcalc 
         CALL eps_writetofile("ieps",desc(4),nw,wgrid,3,ieps)
         !
         CALL eps_writetofile_binary("DipoleMatrix",desc(5),nks,nbnd,K_dipole_aux,focc)
+        IF (metalcalc) THEN
+          CALL eps_writetofile("epsr_intra",desc(6),nw,wgrid,3,epsr_intra,desc2)
+          CALL eps_writetofile("epsi_intra",desc(7),nw,wgrid,3,epsi_intra)
+        ENDIF
+
+        CALL eps_writetofile_proj_binary('epsr_proj', nw, wgrid, nbnd, proj_epsr)
+        CALL eps_writetofile_proj_binary('epsi_proj', nw, wgrid, nbnd, proj_epsi)
         !
     ENDIF
 
-    DEALLOCATE ( epsr, epsi, eels, ieps)
+    DEALLOCATE ( epsr, epsi, eels, ieps, proj_epsr, proj_epsi)
+    IF (metalcalc) THEN
+      DEALLOCATE ( epsr_intra, epsi_intra)
+    ENDIF
     !
     ! local cleaning
     !
