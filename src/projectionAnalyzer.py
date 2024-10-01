@@ -124,10 +124,10 @@ class analyzer:
         epsi_intra = np.sum(epsi_intra, axis=1)
         epsr_intra = 1. + np.sum(epsr_intra, axis=1)
 
-        self.save2csv(wgrid, epsi, filename='epsi(fromBinay).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
-        self.save2csv(wgrid, epsr, filename='epsr(fromBinay).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
-        self.save2csv(wgrid, epsi_intra, filename='epsi_intra(fromBinay).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
-        self.save2csv(wgrid, epsr_intra, filename='epsr_intra(fromBinay).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        self.save2csv(wgrid, epsi, filename='epsi(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        self.save2csv(wgrid, epsr, filename='epsr(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        self.save2csv(wgrid, epsi_intra, filename='epsi_intra(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        self.save2csv(wgrid, epsr_intra, filename='epsr_intra(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
 
         if plot:
             for id, dir in enumerate(['x', 'y', 'z']):
@@ -243,8 +243,16 @@ class analyzer:
             epsi_dir[id,:] = epsi
             epsr_dir[id,:] = epsr
 
-        self.save2csv(wgrid, epsi, filename='epsi.csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
-        self.save2csv(wgrid, epsr, filename='epsr.csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        self.save2csv(wgrid, epsi_dir, filename='epsi.csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        self.save2csv(wgrid, epsr_dir, filename='epsr.csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        
+        self.save2csv(wgrid,  epsi_dir_proj[0,:,:], filename=f'epsi(projected)_x.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsr_dir_proj[0,:,:], filename=f'epsr(projected)_x.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsi_dir_proj[1,:,:], filename=f'epsi(projected)_y.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsr_dir_proj[1,:,:], filename=f'epsr(projected)_y.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsi_dir_proj[2,:,:], filename=f'epsi(projected)_z.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsr_dir_proj[2,:,:], filename=f'epsr(projected)_z.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        
         #self.save2csv(wgrid, epsi_intra, filename='epsi_intra(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
         #self.save2csv(wgrid, epsr_intra, filename='epsr_intra(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
 
