@@ -381,11 +381,6 @@ CONTAINS
         IF(ionode) WRITE(stdout,"(10x,a)") 'Fourth entry is wgrid.'
         IF(ionode) WRITE(stdout,"(10x,a)") 'Fifth entry is the array of transition energies - etrans'
         IF(ionode) WRITE(stdout,"(10x,a)") 'Sixth entry is direction-dependent energy- and k-resolved permitivities (without frequency and inter (intra) smearing)'
-
-        IF(ionode) WRITE(stdout,"(5x,a)") ' '
-        IF(ionode) WRITE(stdout,"(5x,a)") 'proj_$prefix-etrans.bin: Contains the transitions energies - etrans.'
-
-        IF(ionode) WRITE(stdout,"(5x,a)") '-------------------------------------------------'
       ENDIF
       
       ! Construct file name for each direction
@@ -394,6 +389,7 @@ CONTAINS
 
       WRITE(iwprojreal) nw
       WRITE(iwprojreal) nbnd
+      WRITE(iwprojreal) nks
       WRITE(iwprojreal) wgrid
       WRITE(iwprojreal) proj_epsr(dir,:,:,:)
       CLOSE(iwprojreal)
@@ -403,6 +399,7 @@ CONTAINS
 
       WRITE(iwprojimag) nw
       WRITE(iwprojimag) nbnd
+      WRITE(iwprojimag) nks
       WRITE(iwprojimag) wgrid
       WRITE(iwprojimag) proj_epsi(dir,:,:,:)
       CLOSE(iwprojimag)
@@ -423,25 +420,28 @@ CONTAINS
         WRITE(ikprojintra) nw
         WRITE(ikprojintra) nbnd
         WRITE(ikprojintra) nks
-        IF (PRESENT(array_etrans)) WRITE(ikprojintra) array_etrans
-        DO iw = 1, nks        
-          WRITE(ikprojintra) k_proj_intra(dir, iw, :)
-        ENDDO
+        WRITE(ikprojintra) wgrid
+        WRITE(ikprojintra) k_proj_intra(dir, :, :)
         CLOSE(ikprojintra)
       ENDIF
+    
+    ENDDO
+    
+    IF (PRESENT(array_etrans)) THEN
+      IF(ionode) WRITE(stdout,"(5x,a)") ' '
+      IF(ionode) WRITE(stdout,"(5x,a)") 'proj_$prefix-etrans.bin: Contains the transitions energies - etrans.'
+      IF(ionode) WRITE(stdout,"(10x,a)") 'First two entries are nbnd, and nks, respectively.'
+      IF(ionode) WRITE(stdout,"(10x,a)") 'Third entry is the array of transition energies - etrans (NKS,NBND,NBND)'
+      IF(ionode) WRITE(stdout,"(5x,a)") '-------------------------------------------------' 
 
-      IF (PRESENT(array_etrans)) THEN        
-        IF(dir == 1) THEN          
-          str = TRIM(namein) // "_" // TRIM(prefix) // "-etrans.bin"
-          OPEN(UNIT=ietrans, FILE=TRIM(str), STATUS='replace', FORM='UNFORMATTED', ACCESS='stream')
-          DO iw = 1, nks
-            WRITE(ietrans) array_etrans(iw,:,:)
-          ENDDO
-          CLOSE(ietrans)
-        ENDIF
-      ENDIF
-
-    end do
+      str = TRIM(namein) // "_" // TRIM(prefix) // "-etrans.bin"
+      OPEN(UNIT=ietrans, FILE=TRIM(str), STATUS='replace', FORM='UNFORMATTED', ACCESS='stream')
+      WRITE(ietrans) nw
+      WRITE(ietrans) nbnd
+      WRITE(ietrans) nks
+      WRITE(ietrans) array_etrans
+      CLOSE(ietrans)
+    ENDIF
 
     IF(ionode) WRITE(stdout,"(5x,a)") ''
     IF(ionode) WRITE(stdout,"(5x,a)") 'Binary files written.'
@@ -808,7 +808,10 @@ SUBROUTINE eps_calc ( intersmear,intrasmear, nbndmin, nbndmax, shift, metalcalc 
                                                       (etrans**2 - w**2 ) / &
                                                       (( (etrans**2 -w**2 )**2 + intersmear**2 * w**2 )* etrans )
                             
-                            proj_epsr(:,iw,iband1,iband2) = epsr(:,iw)
+                            proj_epsr(:,iw,iband1,iband2) = proj_epsr(:,iw,iband1,iband2)+ dipole(:,iband1,iband2) * RYTOEV**3 * &
+                                                              (focc(iband1,ik)) * &
+                                                              (etrans**2 - w**2 ) / &
+                                                              (( (etrans**2 -w**2 )**2 + intersmear**2 * w**2 )* etrans )
                             
                         ENDDO
                     ENDIF
@@ -824,7 +827,7 @@ SUBROUTINE eps_calc ( intersmear,intrasmear, nbndmin, nbndmax, shift, metalcalc 
                 !
                 ! loop over frequencies
                 !
-                k_proj_intra(:,ik,iband1) = dipole(:,iband1,iband1) * RYTOEV**2 * w0gauss((et(iband1,ik)-efermi)/degauss, ngauss) * (0.5d0 * full_occ)
+                k_proj_intra(:,ik,iband1) = dipole(:,iband1,iband1) * RYTOEV**2 * w0gauss((et(iband1,ik)-efermi)/degauss, ngauss) / (0.5d0 * full_occ)
 
                 DO iw = 1, nw
                     !
@@ -847,7 +850,9 @@ SUBROUTINE eps_calc ( intersmear,intrasmear, nbndmin, nbndmax, shift, metalcalc 
                     epsr_intra(:,iw) = epsr_intra(:,iw) - dipole(:,iband1,iband1) * RYTOEV**2 * &
                                               w0gauss((et(iband1,ik)-efermi)/degauss, ngauss) * w**2 / &
                                               (( w**4 + intrasmear**2 * w**2 )*degauss ) * (0.5d0 * full_occ)
-                    proj_epsr(:,iw,iband1,iband1) = epsr(:,iw)
+                    proj_epsr(:,iw,iband1,iband1) = proj_epsr(:,iw,iband1,iband1)- dipole(:,iband1,iband1) * RYTOEV**2 * &
+                                            w0gauss((et(iband1,ik)-efermi)/degauss, ngauss) * w**2 / &
+                                            (( w**4 + intrasmear**2 * w**2 )*degauss ) * (0.5d0 * full_occ)
                     
                 ENDDO
                 !
