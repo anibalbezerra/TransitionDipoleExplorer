@@ -4,18 +4,21 @@ import math
 import numpy as np
 import pandas as pd
 import time
-
+from coloredLogger import color_log 
 
 class projWFC_parser:
-
-    def __init__(self, filename) -> None:
+    def __init__(self, filename, log_level) -> None:
+        self.logger = color_log(log_level).logger # defining logger to print code info during running 
         self.filename = filename
 
-        self.projections = self.parse_atomic_projections()
-        self.atomic_orbitals = self.print_proj_info(self.projections)
+        if filename:
+            self.projections = self.parse_atomic_projections()
+            self.atomic_orbitals = self.print_proj_info(self.projections)
 
-        duplicatedAtomicOrbitalsDict = self.find_duplicate_indices() # dictionary of the duplicated atomic states columns' indexes
-        print('INFO :: Indexes of duplicated Orbitals  - grouped by kind(desconsidering different quantum numbers) \n', duplicatedAtomicOrbitalsDict)
+            duplicatedAtomicOrbitalsDict = self.find_duplicate_indices() # dictionary of the duplicated atomic states columns' indexes
+            self.logger.warning('INFO :: Indexes of duplicated Orbitals  - grouped by kind(desconsidering different quantum numbers):')
+            print(duplicatedAtomicOrbitalsDict)
+
 
     def timming(func):
         def wrapper(*args, **kwargs):
@@ -25,10 +28,10 @@ class projWFC_parser:
             execution_time = end_time - start_time
             print(f"  Function '{func.__name__}' executed in {execution_time:.4f} seconds. \n\n")
             return result
-        return wrapper
+        return wrapper 
 
     def parse_atomic_projections(self):
-        print('\n INFO :: Parsing Atomic Orbitals projection information \n')
+        self.logger.info('Parsing Atomic Orbitals projection information')
         orbital_map = {
             0: ['S'],
             1: ['Px', 'Py', 'Pz'],
@@ -44,10 +47,8 @@ class projWFC_parser:
         for line in lines:
             if 'Atomic states used for projection' in line:
                 inside_block = True
-                print('\n PROCESSING INFO :: Atomic states used for projection \n')
 
             if inside_block and 'state #' in line:
-                print(line)
                 match = re.search(r'state #\s+(\d+): atom\s+(\d+)\s+\((.*?)\), wfc\s+(\d+)\s+\(l=(\d+)\s+m=\s*(\d+)\)', line)
                 if match:
                     state_number = int(match.group(1))
@@ -73,87 +74,134 @@ class projWFC_parser:
                         'orbital': orbital
                     }
 
-        return projections
+        return projections 
 
     def print_proj_info(self, projections):
 
         atomic_orbitals = []
-        print('\n PROCESSING INFO :: Consolidating atomic orbitals gathering')
+        self.logger.info('Consolidated atomic orbitals gathered')
         for state, info in projections.items():
             print(f"     State #{state}: Atom {info['atom_number']} ({info['atom_type']}), "
                 f"WFC {info['wfc_number']} = {info['orbital']}")
             #atomic_orbitals.append(f"{info['atom_type']}{info['atom_number']}{info['orbital']}")
             atomic_orbitals.append(f"{info['atom_type']}{info['orbital']}")
         
-        print('\n PROCESSING INFO :: Listing found atomic_orbitals \n', atomic_orbitals, '\n')
+        self.logger.info('List of found atomic_orbitals:')
+        print(atomic_orbitals, '\n')
         return atomic_orbitals
+
+    def numerology_sanity_test(self, nbnd, nkstot, e_lineNumber, k_lineNumber, psi2_000_lineNumber, psi2_lineNumber, psi_lineNumber):
+        if k_lineNumber == nkstot:
+            self.logger.warning(f'Number of k points properly parsed') 
+            if e_lineNumber == nkstot*nbnd:
+                self.logger.warning(f'Number of energy projections properly parsed')
+                if psi2_000_lineNumber == psi2_lineNumber - psi_lineNumber:
+                    self.logger.warning(f'Number of psi = 0.00 projections properly parsed')
+                    passed = True
+        else:
+            passed = False
+        return passed
+    
 
     def parse_projwfc_output(self):
         with open(self.filename, 'r') as f:
             lines = f.readlines()
 
-        data = []
-        all_projections=[]
-        current_kpoint = None
-        current_kpoint_magnitude = None
-        ks_state_number = None
-                
-        recording = False
-       
-        for _, line in enumerate(lines):            
-            # Match k-point line
-            if line.startswith(' k ='):
-                kpoint_values = line.split('=')[1].strip().split()
-                current_kpoint = tuple(map(float, kpoint_values))
-                current_kpoint_magnitude = math.sqrt(sum(k**2 for k in current_kpoint))
-            # Match KS state energy line
+        psi2_lineNumber = []
+        psi2_000_lineNumber = []
+        k_lineNumber = []
+        e_lineNumber = []
+        psi_lineNumber = []
+        for ln, line in enumerate(lines, start=1):
+            if line.strip().startswith('|psi|^2 ='):
+                psi2_lineNumber.append(ln)
+                psi_squared = float(line.split('=')[1].strip())
+                if psi_squared == 0.0:
+                    psi2_000_lineNumber.append(ln)            
+            elif line.startswith(' k ='):
+                k_lineNumber.append(ln)
             elif '==== e(' in line:
-                ks_state_number = int(line.split('(')[1].split(')')[0].strip())
-                ks_energy = float(line.split(' ')[-4])            
-            # Match psi projection line
-            elif line.strip().startswith('psi ='):
-                current_block=[]
-                psi_blocks = []
-                projections = [0.0]*len(self.atomic_orbitals)
-                recording = True
-                current_block.append(line.strip())
-            # keeps track of the projection block
-            elif recording:    
-                # Match |psi|^2 line
-                if line.strip().startswith('|psi|^2 =') :
-                    recording = False
-                    psi_blocks.append("".join(current_block))
-                    
-                    psi_components = psi_blocks[0].split('=')[1].strip().split('+')
+                e_lineNumber.append(ln)
+            elif line.strip().startswith('psi ='): 
+                psi_lineNumber.append(ln)
+            elif line.strip().startswith('natomwfc'):
+                natomwfc = int(line.split('=')[-1].strip())
+                self.logger.info(f'natomwfc = {natomwfc}')
+            elif line.strip().startswith('nbnd'):
+                nbnd = int(line.split('=')[-1].strip())
+                self.logger.info(f'nbnd = {nbnd}')
+            elif line.strip().startswith('nkstot'):
+                nkstot = int(line.split('=')[-1].strip())
+                self.logger.info(f'nkstot = {nkstot}')
 
-                    for component in psi_components:
-                        weight, index = component.split('*[#')
-                        weight = float(weight.strip())
 
-                        state_index = int(index.strip(']')) - 1  # Convert to 0-based index
-                        projections[state_index] = weight
+        self.logger.info(f'line numbers:\n \tk {len(k_lineNumber)} \n \te {len(e_lineNumber)}\n \tpsi2 {len(psi2_lineNumber)} \n \tpsi {len(psi_lineNumber)} \n \tpsi2_00 {len(psi2_000_lineNumber)}') 
 
-                    current_block = []
-                    psi_squared = float(line.split('=')[1].strip())
-                    data.append((ks_state_number, ks_energy, current_kpoint, current_kpoint_magnitude, projections[:], psi_squared))
-                    all_projections.append(projections)
+        psi_blocks = [''] * len(e_lineNumber)
 
-                else:
-                    current_block.append(line.strip())          
+        passed = self.numerology_sanity_test(nbnd, nkstot, len(e_lineNumber), len(k_lineNumber), len(psi2_000_lineNumber), len(psi2_lineNumber), len(psi_lineNumber))
+        if passed: self.logger.info('Numerology sanity test passed - parsing is working properly!')
         
+        data = []
+        projection = np.zeros((len(e_lineNumber), natomwfc)) #get the number of bands automatically
+        ks_state_number = np.zeros(len(e_lineNumber), dtype=int)
+        ks_energy = np.zeros(len(e_lineNumber), dtype=float)
+        kpoint = np.zeros((len(e_lineNumber),4), dtype=float)
+        psi_squared = np.zeros(len(e_lineNumber), dtype=float)
+
+        ik = 0
+        for num in range(len(e_lineNumber)):
+            start_block = e_lineNumber[num]
+            end_block = psi2_lineNumber[num]
+            
+            string = ''
+            for i in range(start_block, end_block + 1):
+                if lines[i].strip().startswith('|psi|^2 ='):
+                    break
+                string += lines[i].strip().split('=')[-1]
+
+            psi_blocks[num] = string
+            if psi_blocks[num]:
+                psi_components = psi_blocks[num].split('+')
+                for component in psi_components:
+                    weight, index = component.split('*[#')
+                    weight = float(weight.strip())
+                    state_index = int(index.strip(']')) - 1  # Convert to 0-based index
+                    projection[num, state_index] = weight
+        
+            
+            ks_state_number[num] = int(lines[e_lineNumber[num]-1].split('(')[1].split(')')[0].strip())
+            ks_energy[num] = float(lines[e_lineNumber[num]-1].split(' ')[-4])
+
+            if num % nbnd == 0.0:
+                #self.logger.critical(f'ik = {ik}, num = {num}, nbnd = {nbnd}, line = {lines[k_lineNumber[ik]-1]}')
+                kpoint_values_str = lines[k_lineNumber[ik]-1].split('=')[1].strip().split()
+                kpoint_values = list(map(float,kpoint_values_str ))
+                
+                current_kpoint_magnitude = math.sqrt(sum(k**2 for k in kpoint_values))
+                ik += 1
+
+            kpoint[num,:-1] = np.array(kpoint_values) #kpoint (kx,ky,kz)
+            kpoint[num,-1] = current_kpoint_magnitude #kpoint magnitude abs(k)
+
+            psi_squared[num] = float(lines[psi2_lineNumber[num]-1].split('=')[1].strip())
+
+            data.append((ks_state_number[num], ks_energy[num], tuple(k for k in kpoint[num,:-1]), kpoint[num,-1], \
+                         list(p for p in projection[num,:]), psi_squared[num]))       
+
         return data
     
-       
+
     def save_ks_states_individual(self, proj_data):
-        print('\n SAVING INFO :: creating directory to save projection files ')
+        self.logger.info('Creating directory to save projection files ')
         KS_proj_file_dir = "./projectionFiles"
 
         # Create the directory if it doesn't exist
         if not os.path.exists(KS_proj_file_dir):
             os.makedirs(KS_proj_file_dir)
-            print(f"     Directory '{KS_proj_file_dir}' created.")
+            self.logger.warning(f"     Directory '{KS_proj_file_dir}' created.")
         else:
-            print(f"     Directory '{KS_proj_file_dir}' already exists.")
+            self.logger.warning(f"     Directory '{KS_proj_file_dir}' already exists.")
 
         ks_states = {}
         all_dataframes = []
@@ -165,7 +213,8 @@ class projWFC_parser:
             ks_states[ks_state_number].append((ks_energy, kpoint, kpoint_magnitude, projections, psi_squared))
 
         projection_headers = self.create_atomic_orbital_header().strip().split()
-        print('\n SAVING INFO :: creating projection_headers \n', projection_headers)
+        self.logger.info('Creating projection_headers')
+        print(projection_headers)
 
         for ks_state_number, state_data in ks_states.items():
             output_file = f"./projectionFiles/KS{ks_state_number}_projections.dat"
@@ -192,7 +241,35 @@ class projWFC_parser:
 
                 all_dataframes.append(df)
 
+        #saving dataframes to a single hdf5 file
+        file_name = KS_proj_file_dir + "/structured_projection_dataframes.h5"
+
+        with pd.HDFStore(file_name, mode='w') as store:
+            # Save each DataFrame with a unique key
+            for i, df in enumerate(all_dataframes):
+                store.put(f'df_KS{i}', df, format='table')
+            
+            # Store the number of DataFrames as metadata
+            store.get_storer(f'df_KS0').attrs.nbnd = len(all_dataframes)  # Store `nbnd` as an attribute
+        
+
         return ks_states, all_dataframes
+    
+    def _read_structured_projection_dataframe(self, filename):
+        df_list = []
+
+        with pd.HDFStore(filename, mode='r') as store:
+            # Retrieve the stored `nbnd` from the metadata of the first dataframe
+            nbnd = store.get_storer('df_KS0').attrs.nbnd
+            self.logger.info(f'Reading hdf5 file with structured projection summed in orbitals dataframes returned nbnd = {nbnd}')
+            
+            # Load the DataFrames back into a list
+            for i in range(nbnd):
+                df_list.append(store[f'df_KS{i}'])
+
+                #self.logger.critical(f"df shape {df_list[i].shape} \n {df_list[i].tail(2)}")
+        return df_list
+
     
     def sum_by_orbital(self, df):
         grouped_df = df.T.groupby(level=0).sum()
@@ -203,7 +280,7 @@ class projWFC_parser:
 
         df = df[desired_order]
         return df
-
+    
     def create_atomic_orbital_header(self):
         header = "ik \t e(ev) \t kx \t ky \t kz \t abs(k)"
         # Adding the orbitals dynamically
@@ -228,32 +305,18 @@ class projWFC_parser:
         projections_data = parser.parse_projwfc_output()
         # returns a dictionary with split information for each KS state - keys are the nbnd KS states
         ks_states, listDataframe = parser.save_ks_states_individual(projections_data) 
-        print('\n INSPECTING :: Sample of data saved to file \n',listDataframe[0])
-        print('\n\n FINAL INFO :: Parsing finished with sucess, files saved to directory \n\n.')
+        self.logger.info('INSPECTING :: Sample of data saved to file:')
+        print(listDataframe[0])
+        self.logger.info('Parsing finished with sucess, files saved to directory \n\n.')
         return True
-
-
-
-
-
-
-if __name__ == '__main__':
     
-    path = '../Ag25Au75_32atoms/QE_run/'
-    prefix = 'Ag25Au75'
+if __name__=='__main__':
+
+    path = '/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/projWfc_files/'
+    prefix = 'al'
     filename = path+f'{prefix}.projwfc.out'
 
-    parser = projWFC_parser(filename=filename)
+    parser = projWFC_parser(filename=filename, log_level='trace')
     parsing = parser.parse()
 
-
-
-
-    
-
-    
-    
-
-    
-
-
+    parser._read_structured_projection_dataframe('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/projectionFiles/structured_projection_dataframes.h5')
