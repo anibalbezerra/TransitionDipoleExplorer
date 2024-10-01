@@ -1,639 +1,586 @@
+from coloredLogger import color_log
+from projParser import projWFC_parser as parseProj
+from openBin import parse_eps_binaries as parseEps
+
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib as mpl
 import pandas as pd
-import re
+import matplotlib.pyplot as plt
+import multiprocessing as mp
 import os
-import coloredlogs, logging
-from multiprocessing import Pool, Manager
 
 class analyzer:
-    def __init__(self, parsedProjectionFile_dir, dipoleMatrixResults_dir, verbose = 'debug', loggerLevel = 'INFO') -> None:
-        self.parsedProjectionFile_dir = parsedProjectionFile_dir
-        self.dipoleMatrixResults_dir = dipoleMatrixResults_dir
-        self.verbose = verbose
-        self.logger = logging.getLogger(__name__)
-        coloredlogs.install(level=f'{loggerLevel}', logger=self.logger)
 
+    def __init__(self, projFilename, log_level = 'info', prefix = 'al') -> None:
+        self.log_level = log_level
+        self.projFilename = projFilename
+        self.prefix = prefix
 
-    def read_projections2dataframe(self, filenameRoot='_summed-projections.dat'):
-
-        naming_convention = r'^KS.*_summed-projections.dat$'  # Example regex pattern
+        self.logger = color_log(log_level).logger # defining logger to print code info during running
         
-        # List and filter the files
-        matching_files = []
-        for filename in os.listdir(parsedProjectionFile_dir):
-            if re.match(naming_convention, filename):
-                matching_files.append(filename)
-        #sorting names acendingly
-        matching_files = sorted(matching_files, key=self._natural_sort_key)
+        params = self.get_params()
+        self.natomwfc = params['natomwfc']
+        self.nbnd = params['nbnd']
+        self.nkstot = params['nkstot']
+        self.degauss = params['degauss']         
 
-        if self.verbose == 'debug':
-            print(f'\t Inspecting INFO :: Full list of projections filenames \n {matching_files} \n')
 
-        self.nbnd = len(matching_files) # defines the number of KS states by the amount of files
-
-        self.logger.info(f'Number of Khom-Sham states (bands) = {self.nbnd}')
-        self.logger.info(f'READING INFO :: Name of one of the files (to inspect) =  {matching_files[0]} \n')
+    def read_projections2dataframe(self):
+        self.projData = parseProj(filename=None, log_level=self.log_level)._read_structured_projection_dataframe(self.projFilename)
 
         dataframes = {}
-        for i, filename in enumerate(matching_files):
-            istates = i + 1
+        for istates, df in enumerate(self.projData):
+            dataframes[f'KS{istates+1}'] = df
 
-            data = []
-            with open(self.parsedProjectionFile_dir + filename, 'r') as f:
-                first_line = next(f).strip().split()
-
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        data.append(list(map(float, line.split()[1:])))
-                    
-            df = pd.DataFrame(data, columns=first_line[1:])
-            dataframes[f'KS{istates}'] = df
-
-        if self.verbose == 'debug':
-            #print(f"\t Inspecting INFO :: Example of dataframe read from file \n {dataframes[f'KS{1}']} \n")
-            self.logger.debug(f"\t Inspecting INFO :: Example of dataframe read from file \n {dataframes[f'KS{1}']} \n")
+            print(df.head(2))
+        header = [key for key in df.keys()]
 
         self.logger.info('Dataframes from projection properly generated')
+        self.logger.info(f'Dataframes from projection header:\n{header}')
 
-        return dataframes, first_line[1:]
-
-    def read_DipoleMatrix_to_dataframes(self, in_state = 1, direction='x'):
-        ''' in_state used only for inspecting
-        Runs over all Khom Sham states projections
-        '''
-        def _natural_sort_key(filename):
-            
-            match = re.search(rf'DipoleMatrix_32-2575_{direction}_KS(\d+)\.dat', filename)
-            if match:
-                return int(match.group(1))
-            return filename
-
-        naming_convention = rf'^DipoleMatrix_32-2575_{direction}_KS.*.dat$'  # Example regex pattern
-        
-        # List and filter the files
-        matching_files = []
-        for filename in os.listdir(self.dipoleMatrixResults_dir):
-            if re.match(naming_convention, filename):
-                matching_files.append(filename)
-
-        #sorting names acendingly
-        matching_files = sorted(matching_files, key=_natural_sort_key)
-        if self.verbose == 'debug':
-            print(f'Filenames (ordered) of the dipole data read from file\n {matching_files}')
-
-        dataframes = {}
-        for i, filename in enumerate(matching_files):
-            istates = i + 1
-
-            data = []
-            with open(self.dipoleMatrixResults_dir + filename, 'r') as f:
-                first_line = next(f).strip().split()
-
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        data.append(list(map(float, line.split()[:])))
-                
-            df = pd.DataFrame(data, columns=first_line[:])
-            dataframes[f'KS{istates}'] = df
-
-        if self.verbose == 'debug':
-            print(f"\t Inspecting INFO :: Example of Dipole Matrix dataframe read from file \n {dataframes[f'KS{in_state}']} \n")
-            # Save the DataFrame as a CSV file
-            dataframes[f'KS{in_state}'].to_csv(f'DipoleMatrix_DATAFRAME_KS{in_state}.csv', index=False)  # Set index=False to exclude the index column
-        
-        self.logger.info('Dataframes from Dipole Moment properly generated')
-
-        return dataframes
-
-    def extract_energy_columns(self, dataframes):
-        energy_data = []
-        for _, df in dataframes.items():
-            energy_data.append(df['e(ev)'])
-
-        energy_df = pd.concat(energy_data, axis=1)
-        energy_df.columns = dataframes.keys()
-        return energy_df
-
-    def extract_k_columns(self, dataframes):
-        k_data = []
-        for _, df in dataframes.items():
-            k_data.append(df['abs(k)'])
-
-        k_df = pd.concat(k_data, axis=1)
-        k_df.columns = dataframes.keys()
-        return k_df
-            
-    def _natural_sort_key(self, filename):
-        match = re.search(r'KS(\d+)_summed-projections\.dat', filename)
-        if match:
-            return int(match.group(1))
-        return filename
-
-    def create_difference_dataframe(self, df, in_state=1):
-        k_column = df.iloc[:, 0]
-        first_column = df.iloc[:, in_state]
-        new_df = pd.DataFrame({'abs(k)': k_column})
-
-        diff_columns = {f'Diff_{in_state}{i}': df.iloc[:, i] - first_column for i in range(1, df.shape[1])}
-        diff_df = pd.DataFrame(diff_columns)
-
-        new_df = pd.concat([new_df, diff_df], axis=1)
-        return new_df
-
-    def order_dataframe(self, df, column=0):
-        df_sorted = df.sort_values(by=df.columns[column])
-        order = df_sorted.index
-        return df_sorted, order
-
-    def prepare_consolidated_dataframe(self, projection_header, data, e_diff_df, dipole_data , in_state=1):
-
-        df_projs = data[[x for x in projection_header if x not in ["kx", "ky", "kz", "abs(k)"]]] #[['e(ev)','|psi|^2',  's', 'px', 'py', 'pz' ...]]
-        df_energy = e_diff_df#[[f'abs(k)',f'Diff_{in_state}2',f'Diff_{in_state}3',f'Diff_{in_state}4',f'Diff_{in_state}5',f'Diff_{in_state}6']]
-
-        self.logger.debug(f'\n Dipole Moment from KS{in_state} \n {dipole_data.head(3)}')
-        df_dipole = dipole_data.drop(['nks'], axis=1)  #[['KS2','KS3','KS4','KS5','KS6']]
-
-        merged_df = pd.concat([df_projs, df_energy, df_dipole], axis=1)
-
-        self.orbitals_str = [x for x in df_projs.columns.tolist() if x not in ['e(ev)', '|psi|^2']]
-
-        column_order = ['abs(k)', 'e(ev)', '|psi|^2'] + self.orbitals_str + \
-                    [item for sublist in [[f'Diff_{in_state}{i}', f'KS#{i}'] for i in range(1, self.nbnd+1)] for item in sublist]
-
-        self.logger.debug(f'Consolidated dataframe column order \n {column_order}')        
-        
-        return merged_df[column_order]
+        return dataframes, header
     
-    def orbitals_weigthed_dataframe(self, df, in_state=1):
-        new_columns_dict = {}
-
-        for j in range(1, self.nbnd+1):
-            #if j == in_state:
-            #    continue
-
-            for _, atm_orb in enumerate(self.orbitals_str):
-                new_column_name = f'DipKS_{in_state}_{j}_{atm_orb}'
-                new_columns_dict[new_column_name] = df[f'KS#{j}'] * df[atm_orb] * df[f'|psi|^2']
-
-        # Create a new DataFrame with the calculated columns
-        new_columns_df = pd.DataFrame(new_columns_dict)
-        new_df = pd.concat([df, new_columns_df], axis=1)
-
-        # Drop unnecessary columns
-        columns_to_drop = ['e(ev)', '|psi|^2'] + [orb for orb in self.orbitals_str]
-        new_df = new_df.drop(columns=columns_to_drop)
-
-        # Rearrange columns
-        column_order = ['abs(k)'] + \
-                        [item for sublist in [[f'Diff_{in_state}{i}', f'KS#{i}'] +
-                                            [f'DipKS_{in_state}_{i}_{orb}' for orb in self.orbitals_str]
-                                            for i in range(1, self.nbnd+1)] for item in sublist]
-        new_df = new_df[column_order]
-
-        return new_df
-    
-    def apply_gaussian_smoothing(self, df, energy_column, response_column, sigma, range_start=0, range_end=70):
-        def gaussian(x, mu, sigma):
-            """Calculates the Gaussian value for a given x, mean, and standard deviation."""
-            return np.exp(-(x - mu)**2 / (2 * sigma**2))
-
-        # Create a grid of x values from range_start to range_end
-        x_grid = np.linspace(range_start, range_end, num=10000)
-
-        # Apply Gaussian smoothing to each data point
-        smoothed_response = np.zeros_like(x_grid)
-        for _, row in df.iterrows():
-            energy, response = row[energy_column], row[response_column]
-            smoothed_response += response * gaussian(x_grid, energy, sigma)
-
-        # Normalize the result
-        smoothed_response /= np.where(np.sum(smoothed_response) != 0, np.sum(smoothed_response) * (x_grid[1] - x_grid[0]), 1)
-
-        # Create a new DataFrame
-        smoothed_df = pd.DataFrame({energy_column: x_grid, response_column: smoothed_response})
-        return smoothed_df
-
-    def calculate_energy_contributions(self, df, energy_column='Diff_12', response_column='DipKS_16px'):
-        """Calculates the sum of a response column for each unique energy value."""
-
-        grouped_df = df.groupby(energy_column)[response_column].sum()
-        grouped_df = grouped_df.reset_index()
-
-        if self.verbose == 'debug':
-            print(f'Grouped by energy dataframe energy_column={energy_column}, \
-                    response_column={response_column}\n', grouped_df ,f'\n {grouped_df[response_column].describe()}')
-        return grouped_df
-
-    def calculate_and_smooth_data(self, df, energy_column, response_columns, sigma=0.1):
-        """Calculates energy contributions and applies Gaussian smoothing for multiple response columns.
-        """
-        results = []
-        non_smooth=[]
-        for en_cycle, response_column in enumerate(response_columns):
-            energy_contributions = self.calculate_energy_contributions(df, energy_column, response_column)
-
-            if self.verbose =='debug':
-                print(f'Energy Contributions in {response_column} :: cycle {en_cycle}\n')#, energy_contributions)
-            smoothed_data = self.apply_gaussian_smoothing(energy_contributions, energy_column, response_column, sigma)
-            results.append(smoothed_data)
-            non_smooth.append(energy_contributions)
-        return results, non_smooth
-    
-    def generate_response_columns(self, orbitals, in_state, final_state):
-        response_columns = []
-        for orbital in orbitals:
-            response_columns.append(f'DipKS_{in_state}_{final_state}_{orbital}')
-        return response_columns
-
-    def run_over_KS_states(self, e_df, data, all_dipole_data, \
-                           projection_header,  \
-                            in_state, final_state, \
-                            direction='x', verbosity = 'detailed', path2save_Figs = './figures/'):
+    def read_eps(self, filesRoot = '/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/eps_files/'):
+        self.eps_bin_parser = parseEps(log_level = self.log_level) #parser for binaries files containing eps data
         
-        if not os.path.exists(path2save_Figs): # Create the directory if it doesn't exist
-            os.makedirs(path2save_Figs)
-            if self.verbose == 'debug':
-                print(f"     Directory '{path2save_Figs}' created.")
+        for dir in ['x', 'y', 'z']:
+            data_k = self.eps_bin_parser.unpack_binary(path=filesRoot+f'proj_{self.prefix}_{dir}_k.bin', wproj = False, kproj = True, kproj_intra=False, etrans = False)
+            data_k_intra = self.eps_bin_parser.unpack_binary(path=filesRoot+f'proj_{self.prefix}_{dir}_k-intra.bin', wproj = False, kproj = False, kproj_intra=True, etrans = False)
+            if dir == 'x':
+                k_eps_x = data_k[4]
+                k_eps_x_intra = data_k_intra[4]
+            if dir == 'y':
+                k_eps_y = data_k[4]
+                k_eps_y_intra = data_k_intra[4]
+            if dir == 'z':
+                k_eps_z = data_k[4]
+                k_eps_z_intra = data_k_intra[4]
+
+        nw = data_k[0]
+        nbnd =data_k[1]
+        nks = data_k[2]
+        wgrid =  data_k[3]
+
+        data_etrans = self.eps_bin_parser.unpack_binary(path=filesRoot+f'proj_{self.prefix}-etrans.bin', wproj = False, kproj = False, kproj_intra=False, etrans = True)
+        etrans = data_etrans[3]
+
+        self.logger.info(f'Problem sizes after reading eps binary files: \
+                         \n\tnw = {nw} \n\tnbnd ={nbnd} \n\tnks = {nks} \n\twgrid shape = {wgrid.shape}\
+                         \n\tk_eps_x shape = {k_eps_x.shape} \n\tetrans shape = {etrans.shape}')
+        self.logger.info('Successfully parsed binary eps files!')
+
+        if not self.problems_sizes_sanity_check(nbnd, nks):
+            self.logger.critical('Verify parsing of files: problems sizes sanity check failed...')
         else:
-            if self.verbose == 'debug':
-                print(f"     Directory '{path2save_Figs}' already exists.")
+            return nw, nbnd, nks, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra
 
-        ''' ******************************************************************************************* '''
-        ''' FROM NOW ON THE ANALYSIS WILL HAVE AS INITIAL STATE KS <in_state> AND DIRECTION <direction> '''
-        ''' ******************************************************************************************* '''
+    def problems_sizes_sanity_check(self, nbnd, nks):
+        if nbnd == self.nbnd and nks == self.nkstot:
+            self.logger.info('Problem sizes sanity check passed!')
+            return True
+        else:
+            return False
 
-        e_diff_df = self.create_difference_dataframe(e_df,in_state=in_state)
-        if verbosity == 'detailed' :
-            print(f'\n Energy values differences from KS{in_state} \n', e_diff_df)
+
+    def recover_summed_eps(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra, plot = True):
+        self.logger.info(f'Evaluating eps from data read from binary files')
+        intersmear = 0.1360
+        intrasmear = 0.1360
+     
+        cor = 1e-6
+
+        k_eps = [k_eps_x, k_eps_y, k_eps_z]
+        k_eps_intra = [k_eps_x_intra, k_eps_y_intra, k_eps_z_intra]
+
+        epsi = np.zeros((3, self.nkstot, nw))
+        epsr = np.zeros((3, self.nkstot, nw))
+        epsi_intra = np.zeros((3, self.nkstot, nw))
+        epsr_intra = np.zeros((3, self.nkstot, nw))
+
+        wgrid = np.array(wgrid)
+        wgrid_squared = wgrid**2
+
+        etrans_squared = etrans**2
+        etrans_diff_squared = etrans_squared[:, :, :, np.newaxis] - wgrid_squared
+        aux = (etrans_diff_squared**2 + intersmear**2 * wgrid_squared) * etrans[:, :, :, np.newaxis]
+        aux2 = etrans_diff_squared / (aux + cor)
+
+        for dir, keps_dir in enumerate(k_eps):
+            epsi[dir,:,:] += np.sum(keps_dir[:, :, :, np.newaxis] * intersmear * wgrid / (aux + cor), axis=(1, 2))
+            epsr[dir,:,:] += np.sum(keps_dir[:, :, :, np.newaxis] * aux2, axis=(1, 2))
+
         
-            plt.plot(e_diff_df.iloc[:,final_state])
-            plt.savefig(path2save_Figs + f'energy_diff_KS{in_state}{final_state}.png')
+        aux3 = (wgrid**4 + intrasmear**2 * wgrid_squared) * self.degauss
 
-        ''' ordering dataframes following the energy difference of state KS<final_state>'''
-        ordered_e_diff_df, order = self.order_dataframe(e_diff_df, column=final_state)
-        if verbosity == 'detailed':
-            print(f'\n ORDERED  Energy values differences from KS{in_state} to KS{final_state} \n', ordered_e_diff_df)
-        
-            plt.plot(ordered_e_diff_df.iloc[:,final_state],'-*')
-            plt.savefig(path2save_Figs + f'ordered_energy_diff_KS{in_state}{final_state}.png')
-    
-        ''' consolidating data in a whole dataframe'''
-        consolidated_df = self.prepare_consolidated_dataframe(projection_header, data[f'KS{in_state}'], \
-                                                              e_diff_df, all_dipole_data[f'KS{in_state}'], in_state=in_state)
-        if verbosity == 'detailed':
-            print(f'\n Consolidated Data from transition starting on KS{in_state} \n', consolidated_df)
-            # Save the DataFrame as a CSV file
-        if self.verbose == 'debug':
-            consolidated_df.to_csv(f'Consolidated_transition_from_KS{in_state}.csv', index=False)  
+        for dir, keps_dir in enumerate(k_eps_intra):
+            epsi[dir,:,:] += np.sum(keps_dir[:, :, np.newaxis] * intrasmear * wgrid / (aux3 + cor), axis=1)
+            epsi_intra[dir,:,:] += np.sum(keps_dir[:, :, np.newaxis] * intrasmear * wgrid / (aux3 + cor), axis=1)
 
-        ''' weighting dipoles with orbitals projections'''
-        DipoloxProj = self.orbitals_weigthed_dataframe(consolidated_df, in_state=in_state)
-        orderedDipoloxProj = DipoloxProj.iloc[order]
+            epsr[dir,:,:] -= np.sum(keps_dir[:, :, np.newaxis] * wgrid_squared / (aux3 + cor), axis=1)
+            epsr_intra[dir,:,:] -= np.sum(keps_dir[:, :, np.newaxis] * wgrid_squared / (aux3 + cor), axis=1)
 
-        if verbosity == 'detailed':
-            print(f'\n Energy difference ordered Weigthed Dipole with projections from transition starting on KS{in_state} \n', orderedDipoloxProj)
-            if self.verbose == 'debug':
-                print(f'Energy difference ordered Weigthed Dipole with projections from transition starting on KS{in_state} - columns \n',orderedDipoloxProj.columns[:100] )
+        epsi = np.sum(epsi, axis=1)
+        epsr = 1. + np.sum(epsr, axis=1)
 
+        epsi_intra = np.sum(epsi_intra, axis=1)
+        epsr_intra = 1. + np.sum(epsr_intra, axis=1)
 
-        ''' Calculating energy contributions for the projection over each atomic orbital
-        Using response columns and the Dipole Matrix from <in_state> to <final_state> multiplied by the 
-        projection probabilities of KS<in_state> over the atomic orbitals'''
-        response_columns = self.generate_response_columns(self.orbitals_str, in_state, final_state)
+        self.save2csv(wgrid, epsi, filename='epsi(fromBinay).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        self.save2csv(wgrid, epsr, filename='epsr(fromBinay).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        self.save2csv(wgrid, epsi_intra, filename='epsi_intra(fromBinay).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        self.save2csv(wgrid, epsr_intra, filename='epsr_intra(fromBinay).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
 
-        if final_state == 1:
-            self.logger.info(f'Response columns from in_state {in_state} to final_state {final_state} \n {response_columns}')
-        self.logger.info(f'Calculation from in_state {in_state} to final_state {final_state}')
+        if plot:
+            for id, dir in enumerate(['x', 'y', 'z']):
+                plt.plot(wgrid, epsi[id,:], label = f'epsi_{dir}')
+                plt.plot(wgrid, epsr[id,:], label = f'epsr_{dir}')
+            plt.ylim([-1000,200])
+            plt.xlim([0.01,12])
+            plt.xlabel(r'$\hbar\omega$ (ev)')
+            plt.ylabel(r'permitivity')
+            plt.title('Real and Imag permitivity \nreconstructed from binary data \n(projected on k and on bands)', fontdict={'size':8})
+            plt.legend()
+            plt.savefig('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/results/figures/eps(reconstructed).png')
 
-        energy_contributions, _ = self.calculate_and_smooth_data(df=orderedDipoloxProj, \
-                                                                 energy_column=f'Diff_{in_state}{final_state}', response_columns=response_columns)
-        
-        if verbosity == 'detailed':
-            print('\t Plotting some figures for inspecting')
-            self.plotting('dipole_projection', path2save_Figs, (response_columns,orderedDipoloxProj,in_state,final_state))
-            self.plotting('energy_summed_dipole_projection', path2save_Figs, (direction, energy_contributions,in_state,final_state))
+        return epsi, epsr, epsi_intra, epsr_intra 
 
-        return {f'projDipole_{in_state}_{final_state}': energy_contributions, \
-                'orbitals': self.orbitals_str, \
-                'in_state': in_state, \
-                'final_state': final_state}
+   
+    def recover_summed_eps_proj(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra\
+                                ,proj_dataframes_dict, proj_header, plot = True, metalCalc = True):
+        intersmear = 0.1360
+        intrasmear = 0.1360
+        nproj = len(proj_header[6:-1])
 
-    def plotting(self, kind, path2save_Figs, data):
-        if kind == 'dipole_projection':
-            response_columns,orderedDipoloxProj,in_state,final_state = data
-            plt.clf()
-            for i_atm, atm_orb in enumerate(response_columns):
-                plt.scatter(orderedDipoloxProj[f'Diff_{in_state}{final_state}'], orderedDipoloxProj[atm_orb], label=f'Dipole KS{in_state}-{final_state} - proj {atm_orb}')
-            #plt.yscale('log')
-            plt.legend(bbox_to_anchor=(0.75, 1.1), loc='upper left', borderaxespad=0.0, fontsize=5)
-            plt.savefig(path2save_Figs+'ordered_dipole_projected.png')
+        cor = 1e-6
 
-        elif kind == 'energy_summed_dipole_projection':
-            if not os.path.exists(path2save_Figs + 'energy_summed'): # Create the directory if it doesn't exist
-                os.makedirs(path2save_Figs + 'energy_summed')
-                self.logger.debug(f"Directory '{path2save_Figs + 'energy_summed'}' created.")
-            else:
-                self.logger.debug(f" Directory '{path2save_Figs + 'energy_summed'}' already exists..")
+        k_eps = [k_eps_x, k_eps_y, k_eps_z]
+        k_eps_intra = [k_eps_x_intra, k_eps_y_intra, k_eps_z_intra]
 
-            direction, energy_contributions,in_state,final_state = data
-            plt.clf()
-            for i_atm, atm_orb in enumerate(self.orbitals_str):
-                plt.plot(energy_contributions[i_atm].iloc[:,0], energy_contributions[i_atm].iloc[:,1], label=f'Dipole KS{in_state}-{final_state} - proj {atm_orb}')
-            plt.legend(bbox_to_anchor=(0.75, 1.1), loc='upper left', borderaxespad=0.0, fontsize=5)
-            #plt.yscale('log')
-            plt.xlabel(f'\Delta E_{in_state}_{final_state} (eV)')
-            plt.ylabel('Weigthed Dipole Transition (u.a.)')
-            plt.savefig(path2save_Figs+ 'energy_summed/'+f'energySummed_dipole_projected_{direction}_KS{in_state}_to_KS{final_state}.png')
+        epsi_dir_proj = np.zeros((3,nproj,nw))
+        epsr_dir_proj = np.zeros((3,nproj,nw))
 
-        elif kind == 'consolidated_projections':
-            if not os.path.exists(path2save_Figs + 'consolidated_projections'): # Create the directory if it doesn't exist
-                os.makedirs(path2save_Figs + 'consolidated_projections')
-                self.logger.debug(f"Directory '{path2save_Figs + 'consolidated_projections'}' created.")
-            else:
-                self.logger.debug(f" Directory '{path2save_Figs + 'consolidated_projections'}' already exists..")
+        epsi_dir = np.zeros((3,nw))
+        epsr_dir = np.zeros((3,nw))
 
-            final_df, in_state = data
-            plt.clf()
-            plt.figure(figsize=(16, 12))
-            for i_atm, atm_orb in enumerate(final_df.columns[1:]):
-                self.logger.debug(f"Printing loop {i_atm}")                
-                plt.plot(final_df[final_df.columns[0]], final_df[atm_orb], label=f'KS{in_state}-proj{atm_orb}')
-            plt.legend(bbox_to_anchor=(0.95, 1.0), loc='upper left', borderaxespad=0.0, fontsize=10)
-            plt.xlabel(f'E (eV)', fontsize=18)
-            plt.ylabel('Weigthed Dipole Transition (u.a.)', fontsize=18)
-            plt.title(f'Initial state {in_state}', fontsize=14)
-            plt.tick_params(axis='x', which='both', direction='in', labelsize=14)
-            plt.tick_params(axis='y', which='both', direction='in', labelsize=14)
-            plt.savefig(path2save_Figs+ 'consolidated_projections/'+f'consolidated_dipole_projected_instate={in_state}.png')
-            plt.close()
+        for id, dir in enumerate(['x','y','z']):
+            self.logger.info(f'Running over direction {dir}')
+            denominator = np.zeros(self.nkstot)
+            numerator = np.zeros(self.nkstot)
 
-            for i_atm, atm_orb in enumerate(final_df.columns[1:]):
-                plt.clf()
-                plt.figure(figsize=(16, 12))
-                self.logger.debug(f"Printing loop {i_atm}")                
-                plt.plot(final_df[final_df.columns[0]], final_df[atm_orb], label=f'KS{in_state}-proj{atm_orb}')
-                plt.legend(loc='upper right', borderaxespad=0.0, fontsize=10)
-                plt.xlabel(f'E (eV)', fontsize=18)
-                plt.ylabel('Weigthed Dipole Transition (u.a.)', fontsize=18)
-                plt.title(f'Initial state {in_state} - projected over {atm_orb}')
-                plt.tick_params(axis='x', which='both', direction='in', labelsize=14)
-                plt.tick_params(axis='y', which='both', direction='in', labelsize=14)
-                plt.savefig(path2save_Figs+ 'consolidated_projections/' + f'consolidated_dipole_projected_instate={in_state}_orb{atm_orb}.png')
-                plt.close()
-        
-        elif 'final_projections':
-            if not os.path.exists(path2save_Figs + 'final_projections'): # Create the directory if it doesn't exist
-                os.makedirs(path2save_Figs + 'final_projections')
-                self.logger.debug(f"Directory '{path2save_Figs + 'final_projections'}' created.")
-            else:
-                self.logger.debug(f" Directory '{path2save_Figs + 'final_projections'}' already exists..")
+            aux_imag = np.zeros((self.nkstot, nw))
+            aux_real = np.zeros((self.nkstot, nw))
 
-            final_df = data
-            plt.clf()
-            plt.figure(figsize=(16, 12))
-            for i_atm, atm_orb in enumerate(final_df.columns[1:]):
-                self.logger.debug(f"Printing loop {i_atm}")                
-                plt.plot(final_df[final_df.columns[0]], final_df[atm_orb], label=f'{atm_orb}')
-            plt.legend(bbox_to_anchor=(0.95, 1.0), loc='upper left', borderaxespad=0.0, fontsize=10)
-            plt.xlabel(f'E (eV)', fontsize=18)
-            plt.ylabel('Weigthed Dipole Transition (u.a.)', fontsize=18)
-            plt.title(f'Summed over all states', fontsize=14)
-            plt.tick_params(axis='x', which='both', direction='in', labelsize=14)
-            plt.tick_params(axis='y', which='both', direction='in', labelsize=14)
-            plt.savefig(path2save_Figs+ 'final_projections/'+f'consolidated_dipole_projected.png')
-            plt.close()
+            dif = np.zeros(self.nkstot)
+            et2 = np.zeros(self.nkstot)
+            epsi = np.zeros((self.nkstot, nw))
+            epsr = np.zeros((self.nkstot, nw))
 
-            for i_atm, atm_orb in enumerate(final_df.columns[1:]):
-                plt.clf()
-                plt.figure(figsize=(16, 12))
-                self.logger.debug(f"Printing loop {i_atm}")                
-                plt.plot(final_df[final_df.columns[0]], final_df[atm_orb], label=f'{atm_orb}')
-                plt.legend(loc='upper right', borderaxespad=0.0, fontsize=16)
-                plt.xlabel(f'E (eV)', fontsize=18)
-                plt.ylabel('Weigthed Dipole Transition (u.a.)', fontsize=18)
-                plt.title(f'Projected over {atm_orb}')
-                plt.tick_params(axis='x', which='both', direction='in', labelsize=14)
-                plt.tick_params(axis='y', which='both', direction='in', labelsize=14)
-                plt.savefig(path2save_Figs+ 'final_projections/' + f'consolidated_dipole_projected_orb{atm_orb}.png')
-                plt.close()
+            epsi_ = np.zeros((self.nkstot, nw, self.nbnd, self.nbnd))
+            epsr_ = np.zeros((self.nkstot, nw, self.nbnd, self.nbnd))
 
-    def calculate_dipole_projections(self, in_state, all_data, direction, step = 200, verbosity = 'detailed'):
-        e_df, data, projection_header, all_dipole_data = all_data
-        results = []
-
-        self.logger.critical(f'Run will be from {in_state} up to {self.nbnd} in steps of {step}')
-        if in_state <= self.nbnd:
-            for final_state in range(in_state+1, self.nbnd+1, step): # running over all Khom Sham states
-                if final_state == in_state: continue # skipping intraband contribution - TODO verify how to implement results from intraband
-
-                result = an.run_over_KS_states(e_df, data, all_dipole_data, projection_header = projection_header, \
-                                               in_state=in_state, \
-                                               final_state=final_state, \
-                                               direction=direction, \
-                                               verbosity = verbosity)
-                
-                # Extract relevant data
-                proj_dipole = result[f'projDipole_{in_state}_{final_state}']                
-
-                if verbosity == 'debug':
-                    print('\n\t inspecting \n\n',proj_dipole)
-
-                orbitals = result['orbitals']
-
-                consolidate_energyDF = self.consolidate_energy_dataframe(proj_dipole)
-                results.append(consolidate_energyDF)
-
-            combined_dataframes = self.merge_and_sum_orbital_projections(results)
-            print('\n\n\t Combined energies \n', combined_dataframes, '\n\n')
-
-            self.logger.info(f'Combined projections for in_state {in_state} completed with success')
+            epsi_proj = np.zeros((self.nkstot, nproj, nw, self.nbnd))
+            epsr_proj = np.zeros((self.nkstot, nproj, nw, self.nbnd))
             
-        return combined_dataframes
 
-    def consolidate_energy_dataframe(self, list_dataframes):
-        consolidated_df = pd.DataFrame()
-        for _, df in enumerate(list_dataframes):            
-            consolidated_df = pd.concat([consolidated_df, df], axis=1)
-        consolidated_df = consolidated_df.loc[:,~consolidated_df.columns.duplicated()].copy()
+            for iband1 in range(self.nbnd):
+                for iband2 in range(self.nbnd):  
+                    if iband2 == iband1: continue
 
-        return consolidated_df
-    
-    def merge_and_sum_orbital_projections(self, dataframes, path2save_Figs = './figures/'):
-        self.logger.debug(f'TOTAL OF DATAFRAMES in LIST  {len(dataframes)}')
+                    et2[:] = etrans[:,iband1,iband2]**2
+                    
+                    for iw, w in enumerate(wgrid): 
+                        dif[:] = (et2[:] - w**2)**2
+                        denominator[:] = ((dif + intersmear**2 * w**2) * etrans[:,iband1,iband2]) + cor
+                        numerator[:] = et2[:] - w**2
 
-        energy = dataframes[0].iloc[:,0]
+                        aux_imag[:, iw] =  k_eps[id][:,iband1,iband2] * intersmear * w / denominator[:]
+                        aux_real[:, iw] =  k_eps[id][:,iband1,iband2] * numerator / denominator[:]
 
-        summed_projections = {}
-        final_df = pd.DataFrame()
-        df1 = dataframes[0]
+                        epsi[:, iw] += aux_imag[:, iw]
+                        epsr[:, iw] += aux_real[:, iw]
 
-        for col in df1.columns[1:]:
-            # Extract orbital name (assuming the last part of the column name is the orbital)
-            orbital = col.split('_')[-1]
-            in_state = col.split('_')[1]
-            string = col.split('_')[0] + in_state
-            self.logger.debug(f"First Df col name {string} orbital {orbital}")
+                    epsi_[:, :, iband1, iband2] += aux_imag[:, :]
+                    epsr_[:, :, iband1, iband2] += aux_real[:, :]
+
+            epsi_ = np.sum(epsi_, axis=-1) # summing over iband2
+            epsr_ = np.sum(epsr_, axis=-1) # summing over iband2
             
-            summed_projections[orbital] = df1[col]
+            if metalCalc:
+                for iband1 in range(self.nbnd):            
+                    for iw, w in enumerate(wgrid):
+                        denominator[:] = (w**4 + intrasmear**2 * w**2 ) * self.degauss + cor
 
-            for df2 in dataframes[1:]:
-                # Find the corresponding column in the second dataframe
-                matching_col = None
-                for col2 in df2.columns[1:]:
-                    if col2.split('_')[-1] == orbital:
-                        matching_col = col2
-                        self.logger.debug(f"Second Df matching column {matching_col} with {orbital}")
-                        break
+                        aux_imag[:, iw] = k_eps_intra[id][:,iband1] * intrasmear * w / denominator[:]
+                        aux_real[:, iw] = k_eps_intra[id][:,iband1] * w**2 / denominator[:]
 
-                if matching_col:
-                    # Sum the corresponding projections
-                    summed_projections[orbital] = summed_projections[orbital] + df2[matching_col] 
+                        epsi[:, iw] += aux_imag[:, iw]
+                        epsr[:, iw] -= aux_real[:, iw]
 
-        # Add the summed projections to the final dataframe
-        final_df[f'energy_{in_state}'] = energy
-        for orbital, values in summed_projections.items():
-            final_df[string+f'_{orbital}'] = values
-        
-        print('\n\n\tfinal df after summing two dfs\n',final_df)
-        self.plotting('consolidated_projections', path2save_Figs, (final_df, in_state))
-
-        return final_df   
-    
-    def _calculate_and_append(self,in_state, results_list, e_df, data, projection_header, all_dipole_data, step, direction, verbosity):
-        self.logger.info(f'Calculating dipole projections varying in_states: in_state = {in_state}')
-        projctDF = self.calculate_dipole_projections(in_state=in_state, all_data=(e_df, data, projection_header, all_dipole_data), step=step, direction=direction, verbosity = verbosity)
-        results_list.append(projctDF)
-        
-    def run_over_instates(self, all_data, initial= 1, final = 3, step=200, direction='x', path2save_Figs = './figures/'):
-
-        self.logger.info('Calculating dipole projections varying in_states')
-        (data, e_df, projection_header, all_dipole_data) = all_data
-
-        results = {}
-        manager = Manager()
-        results_list = manager.list()  # Create a shared list
-        verbosity = self.verbose
-
-        self.logger.critical(f'It will be considered INITIAL STATES ranging from {initial} up tp {final} :: See if is this correct.')
-        '''for in_state in range(initial,final):
-            self.logger.info(f'Calculating dipole projections varying in_states: in_state = {in_state}')
-
-            projctDF = self.calculate_dipole_projections(in_state=in_state, data=(e_df, projection_header, all_dipole_data), step=step, direction=direction, verbosity = 'normal')
-            results = {f'state_{in_state}': projctDF}
-            results_list.append(projctDF)'''
-        
-        with Pool() as pool:
-            # Create arguments for each function call
-            args_list = [(i, results_list, e_df, data, projection_header, all_dipole_data, step, direction, verbosity) for i in range(initial, final)]
-
-            # Parallelize the function calls
-            pool.starmap(self._calculate_and_append, args_list)
-
-        self.logger.critical(f'results_list length {len(results_list)}')
-        energy = results_list[0].iloc[:,0]
-        summed_projections = {}
-        final_df = pd.DataFrame()
-        df1 = results_list[0]
-
-        self.logger.info('\n\nSumming over all in_states')
-        for col in df1.columns[1:]:
-            # Extract orbital name (assuming the last part of the column name is the orbital)
-            orbital = col.split('_')[-1]
-            string = col.split('_')[0] 
-            self.logger.debug(f"First Df col name {string} orbital {orbital}")
+                    epsi_[:, :, iband1] += aux_imag[:, :]
+                    epsr_[:, :, iband1] -= aux_real[:, :]
             
-            summed_projections[orbital] = df1[col]
 
-            for df2 in results_list[1:]:
-                # Find the corresponding column in the second dataframe
-                matching_col = None
-                for col2 in df2.columns[1:]:
-                    if col2.split('_')[-1] == orbital:
-                        matching_col = col2
-                        self.logger.debug(f"Second Df matching column {matching_col} with {orbital}")
-                        break
+            for ia, atmwfc in enumerate(proj_header[6:-1]):
+                for iband1 in range(self.nbnd):
+                    filtered_proj, filtered_proj_header = self.get_atm_proj(iband1, proj_dataframes_dict, proj_header)          
+                    proj = filtered_proj[:, ia] * filtered_proj[:, -1]
 
-                if matching_col:
-                    # Sum the corresponding projections
-                    summed_projections[orbital] = summed_projections[orbital] + df2[matching_col] 
+                    for iw, w in enumerate(wgrid):
+                        epsi_proj[:, ia, iw, iband1] = epsi_[:, iw, iband1] * proj
+                        epsr_proj[:, ia, iw, iband1] = epsr_[:, iw, iband1] * proj
 
-        # Add the summed projections to the final dataframe
-        final_df[f'energy_{1}'] = energy
-        for orbital, values in summed_projections.items():
-            final_df[f'{orbital}'] = values
+            epsi = np.sum(epsi, axis=0)
+            epsr = 1. + np.sum(epsr, axis=0)
 
-        self.logger.info(f'final df after summing all dfs\n {final_df}')
+            epsi_proj = np.sum(epsi_proj, axis=(0, -1)) # summing over k and iband 1
+            epsr_proj = 1. + np.sum(epsr_proj, axis=(0, -1)) # summing over k and iband 1
 
-        self.plotting('final_projections', path2save_Figs, (final_df))
+            epsi_proj_sum = np.sum(epsi_proj, axis=(0))
+            epsr_proj_sum = np.sum(epsr_proj, axis=(0))
 
-        self.logger.info(f'Saving consolidated Dipole Moment for direction {direction} to file')
-        final_df.to_csv(f'Dipole_moment_dir_{direction}.csv', index=False) # saving Consolidated dipole momento for direction to file
+            epsi_dir_proj[id,:,:] = epsi_proj[:,:]
+            epsr_dir_proj[id,:,:] = epsr_proj[:,:]
 
-        return results
+            epsi_dir[id,:] = epsi
+            epsr_dir[id,:] = epsr
+
+        self.save2csv(wgrid, epsi, filename='epsi.csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        self.save2csv(wgrid, epsr, filename='epsr.csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        #self.save2csv(wgrid, epsi_intra, filename='epsi_intra(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        #self.save2csv(wgrid, epsr_intra, filename='epsr_intra(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+
+
+        if plot:
+            plt.clf()
+            
+            plt.plot(wgrid, epsi[:], label = f'epsi_x')
+            plt.plot(wgrid, epsr[:], label = f'epsr_x')
+            for ia, atmwfc in enumerate(proj_header[6:-1]):
+                plt.plot(wgrid, epsi_proj[ia,:], label = f'epsi_x_{atmwfc}')
+                plt.plot(wgrid, epsr_proj[ia,:], label = f'epsr_x_{atmwfc}')
+            plt.plot(wgrid, epsi_proj_sum[:], label = f'epsi_x_summed')
+            plt.plot(wgrid, epsr_proj_sum[:], label = f'epsr_x_summed')
+            plt.ylim([-1000,200])
+            plt.xlim([0.01,12])
+            plt.xlabel(r'$\hbar\omega$ (ev)')
+            plt.ylabel(r'permitivity')
+            plt.title('Real and Imag permitivity \nreconstructed from binary data \n(before projecting over bands)', fontdict={'size':8})
+            plt.legend()
+            plt.savefig('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/results/figures/eps(beforeprojection).png')
+
+            plt.clf()
+            plt.plot(wgrid, epsi[:], label = f'epsi_x')
+            plt.plot(wgrid, epsr[:], label = f'epsr_x')
+            for id, dir in enumerate(['x','y','z']):
+                plt.plot(wgrid,  np.sum(epsi_dir_proj, axis=1)[id, :], label = f'epsi_{dir}_summed')
+                plt.plot(wgrid,  np.sum(epsr_dir_proj, axis=1)[id, :], label = f'epsr_{dir}_summed')
+            plt.ylim([-1000,200])
+            plt.xlim([0.01,12])
+            plt.xlabel(r'$\hbar\omega$ (ev)')
+            plt.ylabel(r'permitivity')
+            plt.title('Real and Imag permitivity \nreconstructed from binary data \n(before projecting over bands)', fontdict={'size':8})
+            plt.legend()
+            plt.savefig('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/results/figures/eps(proj_dir).png')
+
+        
+        return epsi, epsr, None, None
+
+
     
-    def run_all(self, initial_state, final_state, step, direction):
-        verbosity = self.verbose
+    def recover_summed_eps_proj_wrong(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra\
+                                ,proj_dataframes_dict, proj_header, plot = True, metalCalc = True):
+        self.logger.info(f'Evaluating eps from data read from binary files')
+        intersmear = 0.1360
+        intrasmear = 0.1360
+     
+        cor = 1e-6
 
-        '''Reading data from files - storing as dataframes
-        *reading all projections file - Ordered in k indexes (1 to NK) (not the absolut value)
-        *dataframes will have "e(ev) kx ky kz k-point magnitude <orbitals> |psi|^2"
-        *Results in a dictionary containing all dataframes
-        '''    
-        data, projection_header = self.read_projections2dataframe()
+        nproj = len(proj_header[6:-1])
 
-        ''' creating a new dataframe with only the energies - Shaped (8000,natm)
-            dataframe is ordered in k indexes (1 to nk) (not the absolut value)
-        '''    
-        e_df = self.extract_energy_columns(data)
-        if verbosity == 'detailed':
-            print('\n\t Energy values \n', e_df.head(10))
+        k_eps = [k_eps_x, k_eps_y, k_eps_z]
+        k_eps_intra = [k_eps_x_intra, k_eps_y_intra, k_eps_z_intra]
 
-        ''' creating a new dataframe with only the k values - Ordered in k indexes (1 to 8000)  
-            should have <total_KS> repeated columns 
-        '''
-        k_df = self.extract_k_columns(data)
-        if verbosity == 'detailed':
-            print('\n k values \n', k_df)
+        epsi = np.zeros((self.nkstot, nw))
+        epsr = np.zeros((self.nkstot, nw))
+        epsi_intra = np.zeros((self.nkstot, nw))
+        epsr_intra = np.zeros((self.nkstot, nw))
 
-        ''' adding the k values to the energy dataframe as the first column  
-        '''
-        e_df.insert(0, 'abs(k)', k_df.iloc[:,0])
-        if verbosity == 'detailed':
-            print('\n Energy values with k values inserted \n', e_df)
+        epsi_proj = np.zeros((self.nkstot, nproj, nw))
+        epsr_proj = np.zeros((self.nkstot, nproj, nw))
+        epsi_intra_proj = np.zeros((self.nkstot, nproj, nw))
+        epsr_intra_proj = np.zeros((self.nkstot, nproj, nw))
+       
+        for ia, atmwfc in enumerate(proj_header[6:-1]):
+             for iband1 in range(self.nbnd):      
+                filtered_proj, filtered_proj_header = self.get_atm_proj(iband1, proj_dataframes_dict, proj_header)          
+                proj = filtered_proj[:, ia] * filtered_proj[:, -1]
+                proj = 1
 
-        ''' reading dipole matrix for state KS1 and direction x'''
-        all_dipole_data = self.read_DipoleMatrix_to_dataframes(in_state=50, direction=direction) # reads all dipoles from files generating dictionary of dataframes 
+                for iband2 in range(self.nbnd): 
+                    if iband2 == iband1: continue
+                    for iw, w in enumerate(wgrid):                        
+                        aux = ((etrans[:,iband1,iband2]**2 - w**2)**2 + intersmear * w**2) * etrans[:,iband1,iband2]   
+                                                
+                        #for dir, keps_dir in enumerate(k_eps):
+                        epsi[:, iw] += proj * k_eps_x[:,iband1,iband2] * intersmear * w / (aux + cor)
+                        epsr[:, iw] += proj * k_eps_x[:,iband1,iband2] * (etrans[:,iband1,iband2]**2 - w**2) / (aux + cor)
+                        epsi_proj[:, ia, iw] += proj * k_eps_x[:,iband1,iband2] * intersmear * w / (aux + cor)
+                        epsr_proj[:, ia, iw] += proj * k_eps_x[:,iband1,iband2] * (etrans[:,iband1,iband2]**2 - w**2) / (aux + cor)
 
-        if final_state == None:
-            final_state = self.nbnd # Defining Final state as all states
+                #intraband
+                if metalCalc:
+                    for iw, w in enumerate(wgrid):  
+                        aux3 = ( w**4 + intrasmear * w**2) * self.degauss     
+                        epsi[:, iw] += proj * k_eps_x_intra[:,iband1] * intrasmear * w / (aux3 + cor)
+                        epsr[:, iw] -= proj * k_eps_x_intra[:,iband1] *  w**2 / (aux3 + cor)
+                        epsi_proj[:, ia, iw] += proj * k_eps_x_intra[:,iband1] * intrasmear * w / (aux3 + cor)
+                        epsr_proj[:, ia, iw] -= proj * k_eps_x_intra[:,iband1] *  w**2 / (aux3 + cor)
+                        epsi_intra[:,iw] += proj * k_eps_x_intra[:,iband1] * intrasmear * w / (aux3 + cor)
+                        epsr_intra[:, iw] -= proj * k_eps_x_intra[:,iband1] *  w**2 / (aux3 + cor)
+                        epsi_intra_proj[:, ia, iw] += proj * k_eps_x_intra[:,iband1] * intrasmear * w / (aux3 + cor)
+                        epsr_intra_proj[:, ia, iw] -= proj * k_eps_x_intra[:,iband1] *  w**2 / (aux3 + cor)
+       
+        epsi = np.sum(epsi, axis=0)
+        epsr = 1. + np.sum(epsr, axis=0)
 
-        results = self.run_over_instates(all_data= (data, e_df, projection_header, all_dipole_data), initial= initial_state, final = final_state, step=step , direction=direction)
+        epsi_proj = np.sum(epsi_proj, axis=0)
+        epsr_proj = 1. + np.sum(epsr_proj, axis=0)
+
+        epsi_intra = np.sum(epsi_intra, axis=0)
+        epsr_intra = 1. + np.sum(epsr_intra, axis=0)
+
+        #self.save2csv(wgrid, epsi, filename='epsi(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        #self.save2csv(wgrid, epsr, filename='epsr(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        #self.save2csv(wgrid, epsi_intra, filename='epsi_intra(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        #self.save2csv(wgrid, epsr_intra, filename='epsr_intra(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+
+        if plot:
+            plt.clf()
+            
+            plt.plot(wgrid, epsi[:], label = f'epsi_x')
+            plt.plot(wgrid, epsr[:], label = f'epsr_x')
+            plt.ylim([-1000,200])
+            plt.xlim([0.01,12])
+            plt.xlabel(r'$\hbar\omega$ (ev)')
+            plt.ylabel(r'permitivity')
+            plt.title('Real and Imag permitivity \nreconstructed from binary data \n(projected on k and on bands)', fontdict={'size':8})
+            plt.legend()
+            plt.savefig('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/results/figures/eps(reconstructed_afterBands).png')
+
+            plt.clf()
+            for ia, atmwfc in enumerate(proj_header[6:-1]):
+                plt.plot(wgrid,epsi_proj[ia,:], label=f'epsi_{atmwfc}')
+                plt.plot(wgrid,epsr_proj[ia,:], label=f'epsr_{atmwfc}')
+            plt.plot(wgrid, epsi[:],   '-*', label = f'epsi_x')
+            plt.plot(wgrid, epsr[:], '-*', label = f'epsr_x')
+            plt.ylim([-1000,200])
+            plt.xlim([0.01,12])
+            plt.xlabel(r'$\hbar\omega$ (ev)')
+            plt.ylabel(r'permitivity')
+            plt.title('Real and Imag permitivity \nreconstructed from binary data \n(projected on k and on bands)', fontdict={'size':8})
+            #plt.legend()
+            plt.savefig('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/results/figures/eps(projBands).png')
+
+        
+        return epsi, epsr, epsi_intra, epsr_intra   
+
+    def atmwfc_projected_eps(self, nw, wgrid, etrans, k_eps_x, k_eps_x_intra, proj_dataframes_dict, proj_header, direction='x'):
+        self.logger.info(f'Number of atomic projections = {self.natomwfc}')
+        self.logger.info(f'Evaluating eps projections over atomic orbitals for direction {direction} (takes time...)')
+        epsi_proj = np.zeros((self.natomwfc, self.nkstot, nw))
+        epsr_proj = np.zeros((self.natomwfc, self.nkstot, nw))
+
+        epsi_proj_intra = np.zeros((self.natomwfc, self.nkstot, nw))
+        epsr_proj_intra = np.zeros((self.natomwfc, self.nkstot, nw))
+
+        intersmear = 0.136
+        intrasmear = 0.136
+        cor = 1e-6 
+
+        # Precompute wgrid squared
+        wgrid_squared = wgrid**2
+
+        for choose_projection in range(self.natomwfc):
+            for iband1 in range(self.nbnd):
+                filtered_proj, filtered_proj_header = self.get_atm_proj(iband1, proj_dataframes_dict, proj_header)
+                if iband1 == 0:
+                    self.logger.info(f'\tEvaluating projection {filtered_proj_header[choose_projection]}')
+                projFactor = np.ones_like(filtered_proj[:, choose_projection] * filtered_proj[:, -1])
+
+                for iband2 in range(self.nbnd):
+                    if iband2 == iband1: continue
+
+                    etrans_diff_squared = etrans[:, iband1, iband2][:, np.newaxis]**2 - wgrid_squared
+                    aux = (etrans_diff_squared**2 + intersmear**2 * wgrid_squared) * etrans[:, iband1, iband2][:, np.newaxis]
+                    aux2 = etrans_diff_squared / (aux + cor)
+
+                    epsi_proj[choose_projection,:,:] += projFactor[:, np.newaxis] * k_eps_x[:, iband1, iband2][:, np.newaxis] * intersmear * wgrid / (aux + cor)
+                    epsr_proj[choose_projection,:,:] += projFactor[:, np.newaxis] * k_eps_x[:, iband1, iband2][:, np.newaxis] * aux2
+
+                #intraband
+                aux3 = (wgrid**4 + intersmear**2 * wgrid_squared) * self.degauss
+
+                epsi_proj[choose_projection,:,:] += projFactor[:, np.newaxis] * k_eps_x_intra[:, iband1][:, np.newaxis] * intrasmear * wgrid / (aux3 + cor)
+                epsr_proj[choose_projection,:,:] -= projFactor[:, np.newaxis] * k_eps_x_intra[:, iband1][:, np.newaxis] * wgrid**2 / (aux3 + cor)
+
+                epsi_proj_intra[choose_projection,:,:] += projFactor[:, np.newaxis] * k_eps_x_intra[:, iband1][:, np.newaxis] * intrasmear * wgrid / (aux3 + cor)
+                epsr_proj_intra[choose_projection,:,:] -= projFactor[:, np.newaxis] * k_eps_x_intra[:, iband1][:, np.newaxis] * wgrid**2 / (aux3 + cor)
+
+        epsi = np.sum(epsi_proj, axis = 0) #summing over the orbitals
+        epsr = np.sum(epsr_proj, axis = 0) #summing over the orbitals
+
+        epsi_proj = np.sum(epsi_proj, axis=1)        
+        epsr_proj = 1. + np.sum(epsr_proj, axis=1)        
+
+        epsi_proj_intra = np.sum(epsi_proj_intra, axis=1)
+        epsr_proj_intra = 1. + np.sum(epsr_proj_intra, axis=1)
+
+        epsi = np.sum(epsi, axis = 0)
+        epsr = 1. + np.sum(epsr, axis = 0)
+
+        epsi_intra = np.sum(epsi_proj_intra, axis = 0)
+        epsr_intra = np.sum(epsr_proj_intra, axis = 0)
+
+        self.save2csv(wgrid, epsi_proj, filename=f'epsi(projected)_{direction}.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid, epsr_proj, filename=f'epsr(projected)_{direction}.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid, epsi_proj_intra, filename=f'epsi_intra(projected)_{direction}.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid, epsr_proj_intra, filename=f'epsi_intra(projected)_{direction}.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+
+        self.save2csv(wgrid, epsi, filename=f'epsi(sum_over_projection)_{direction}.csv', directory = './results/csv', transpose=True,  columns=[f'epsi_{direction}'])
+        self.save2csv(wgrid, epsr, filename=f'epsr(sum_over_projection)_{direction}.csv', directory = './results/csv', transpose=True,  columns=[f'epsi_{direction}'])
+
+        return epsi_proj, epsr_proj, epsi_proj_intra, epsr_proj_intra, epsi, epsr, epsi_intra, epsr_intra   
+    
+    def save2csv(self, wgrid, array, filename, directory = './results/csv', **kwargs):
+        # Create the directory if it doesn't exist
+        if kwargs['transpose']:
+            array = array.T
+        if 'columns' in kwargs:
+            columns = kwargs['columns']
+        else:
+            columns = None
 
 
-        return results
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        df = pd.DataFrame(array, columns=columns)
+        df.insert(0, 'ev', wgrid)
+        df.to_csv(os.path.join(directory, filename), index=False)
+
+
+    def get_atm_proj(self, iband, proj_dataframes_dict, proj_header):
+        proj = proj_dataframes_dict[f'KS{iband+1}']
+        filtered_proj = proj.values[:,6:]
+        filtered_proj_header = proj_header[6:]
+        return filtered_proj, filtered_proj_header   
+
+    def get_params(self, projWFCfilename = '/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/projWfc_files/al.projwfc.out') :
+        with open(projWFCfilename, 'r') as f:
+            lines = f.readlines()
+
+        # Extract natomwfc, nbnd, nkstot
+        for line in lines:
+            if line.strip().startswith("natomwfc"):
+                natomwfc = int(line.split("=")[1].strip())
+            elif line.strip().startswith("nbnd"):
+                nbnd = int(line.split("=")[1].strip())
+            elif line.strip().startswith("nkstot"):
+                nkstot = int(line.split("=")[1].strip())
+            elif line.strip().startswith("Gaussian broadening"):
+                degauss = float(line.split("=")[1].strip().split()[1])
+        
+        self.logger.info(f'Problem sizes read from prokwfc.out: \n\tnatomwfc =  {natomwfc} \n\tnbnd =  {nbnd} \n\tnkstot =  {nkstot} \n\tdegauss = {degauss}')
+        return {'natomwfc': natomwfc, 'nbnd': nbnd, 'nkstot': nkstot, 'degauss': degauss}
+    
+    def run(self, plot = False):
+        proj_dataframes_dict, proj_header = self.read_projections2dataframe() # returns a dictionary with the projection dataframes for each KS state-
+        nw, nbnd, nks, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra = self.read_eps()
+
+        filtered_proj_header = proj_header[6:]
+    
+        epsi, epsr, epsi_intra, epsr_intra = an.recover_summed_eps(nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra)
+    
+        #epsi_proj, epsr_proj, epsi_proj_intra, epsr_proj_intra, \
+        #    epsi_total, epsr_total, epsi_intra, epsr_intra= an.atmwfc_projected_eps(nw, \
+         #                                                                       wgrid, etrans, k_eps_x, k_eps_x_intra, proj_dataframes_dict, proj_header)
+        
+        epsi_proj, epsr_proj, epsi_intra, epsr_intra = an.recover_summed_eps_proj(nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra\
+                                ,proj_dataframes_dict, proj_header, plot = True)
+        
+        if plot:
+            plt.clf()
+            for ic in range(len(filtered_proj_header)-1):
+                plt.plot(wgrid, epsi_proj[:], label = f'epsi_{filtered_proj_header[ic]}')
+                #plt.plot(wgrid, epsi_total, label = f'epsi_total')
+                plt.plot(wgrid, epsr_proj[:], label = f'epsr_{filtered_proj_header[ic]}')
+                #plt.plot(wgrid, epsr_total, label = f'epsr_total')
+            plt.ylim([-100,200])
+            plt.xlim([0.01,12])
+            plt.xlabel(r'$\hbar\omega$ (ev)')
+            plt.ylabel(r'permitivity')
+            plt.title(f'Real and Imag permitivity \n(projected onto atomic wavefunctions)', fontdict={'size':8})
+            plt.legend(bbox_to_anchor=(0.8, 0.8), loc='upper left', borderaxespad=0.0, fontsize=6)
+            plt.savefig('./results/figures/eps(projected).png')
+
+            plt.clf()
+            plt.plot(wgrid, epsi[0,:], label = f'epsi')
+            plt.plot(wgrid, epsi_proj, label = f'epsi_projection')
+            plt.plot(wgrid, epsr[0,:], label = f'epsr')
+            plt.plot(wgrid, epsr_proj, label = f'epsr_projection')
+            plt.ylim([-100,200])
+            plt.xlim([0.01,12])
+            plt.xlabel(r'$\hbar\omega$ (ev)')
+            plt.ylabel(r'permitivity')
+            plt.title(f'Real and Imag permitivity \n comparison of total and projected summed', fontdict={'size':8})
+            plt.legend()
+            plt.savefig('./results/figures/eps(comparison).png')
 
 
 if __name__ == '__main__':
 
-    verbosity = 'normal' #options 'detailed' and 'debug'
-    loggerLevel = 'INFO' #option 'INFO' and 'DEBUG'
-    direction = ['x','y','z']
-    initial_state = 1
-    final_state = None
-    step = 1
+    log_level = 'info'
+    prefix = 'al'
+    projFilename = '/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/projectionFiles/structured_projection_dataframes.h5'
+    an = analyzer(projFilename = projFilename, log_level = log_level, prefix = prefix)
 
-    parsedProjectionFile_dir = '/scratch_drive/anibal/DFT/ProjWFC/AtomicOrbitalsResolvedOpticalReponse/projectionFiles/'
-    dipoleMatrixResults_dir = '/scratch_drive/anibal/DFT/ProjWFC/Ag25Au75_32atoms/QE_run/DipoleMatrix_results/'
-    
-    an = analyzer(parsedProjectionFile_dir=parsedProjectionFile_dir, dipoleMatrixResults_dir = dipoleMatrixResults_dir, verbose=verbosity, loggerLevel = 'INFO')
+    an.run()
 
-    for dir in direction:        
-        result = an.run_all(initial_state, final_state, step, direction=dir)
-
-
-
+    '''proj_dataframes_dict, proj_header = an.read_projections2dataframe() # returns a dictionary with the projection dataframes for each KS state-
+    nw, nbnd, nks, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra = an.read_eps()
   
+
+    filtered_proj_header = proj_header[6:]
+    
+    epsi, epsr, epsi_intra, epsr_intra = an.recover_summed_eps(nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra)
+    
+    epsi_proj, epsr_proj, epsi_proj_intra, epsr_proj_intra, \
+        epsi_total, epsr_total, epsi_intra, epsr_intra= an.atmwfc_projected_eps(nw, \
+                                                                                wgrid, etrans, k_eps_x, k_eps_x_intra, proj_dataframes_dict, proj_header)'''
+
+'''
+    for ic in range(len(filtered_proj_header)-1):
+        plt.plot(wgrid, epsi_proj[ic,:], label = f'epsi_{filtered_proj_header[ic]}')
+        plt.plot(wgrid, epsi_total, label = f'epsi_total')
+        plt.plot(wgrid, epsr_proj[ic,:], label = f'epsr_{filtered_proj_header[ic]}')
+        plt.plot(wgrid, epsr_total, label = f'epsr_total')
+    plt.ylim([-100,200])
+    plt.xlim([0.01,12])
+    plt.xlabel(r'$\hbar\omega$ (ev)')
+    plt.ylabel(r'permitivity')
+    plt.title(f'Real and Imag permitivity \n(projected onto atmwfc={filtered_proj_header[choose_projection]})', fontdict={'size':8})
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.0)
+    plt.savefig('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/results/figures/eps(projected).png')
+
+    plt.clf()
+    plt.plot(wgrid, epsi[0,:], label = f'epsi')
+    plt.plot(wgrid, epsi_total, label = f'epsi_projection')
+    plt.plot(wgrid, epsr[0,:], label = f'epsr')
+    plt.plot(wgrid, epsr_total, label = f'epsr_projection')
+    plt.ylim([-100,200])
+    plt.xlim([0.01,12])
+    plt.xlabel(r'$\hbar\omega$ (ev)')
+    plt.ylabel(r'permitivity')
+    plt.title(f'Real and Imag permitivity \n comparison of total and projected summed', fontdict={'size':8})
+    plt.legend()
+    plt.savefig('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/results/figures/eps(comparison).png')
+    '''
