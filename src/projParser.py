@@ -49,7 +49,7 @@ class projWFC_parser:
                 inside_block = True
 
             if inside_block and 'state #' in line:
-                match = re.search(r'state #\s+(\d+): atom\s+(\d+)\s+\((.*?)\), wfc\s+(\d+)\s+\(l=(\d+)\s+m=\s*(\d+)\)', line)
+                match = re.search(r'state #\s*(\d+): atom\s+(\d+)\s+\((.*?)\), wfc\s+(\d+)\s+\(l=(\d+)\s+m=\s*(\d+)\)', line)
                 if match:
                     state_number = int(match.group(1))
                     atom_number = int(match.group(2))
