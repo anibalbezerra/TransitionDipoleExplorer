@@ -10,14 +10,18 @@ import os
 
 class analyzer:
 
-    def __init__(self, projFilename, log_level = 'info', prefix = 'al') -> None:
+    def __init__(self, projFilename, projWFCfilename, log_level = 'info', prefix = 'al') -> None:
         self.log_level = log_level
         self.projFilename = projFilename
+        self.projWFCfilename = projWFCfilename
         self.prefix = prefix
 
         self.logger = color_log(log_level).logger # defining logger to print code info during running
+
+        if not os.path.exists('./results/figures'):
+            os.makedirs('./results/figures')
         
-        params = self.get_params()
+        params = self.get_params(projWFCfilename = self.projWFCfilename)
         self.natomwfc = params['natomwfc']
         self.nbnd = params['nbnd']
         self.nkstot = params['nkstot']
@@ -39,7 +43,7 @@ class analyzer:
 
         return dataframes, header
     
-    def read_eps(self, filesRoot = '/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/eps_files/'):
+    def read_eps(self, filesRoot):
         self.eps_bin_parser = parseEps(log_level = self.log_level) #parser for binaries files containing eps data
         
         for dir in ['x', 'y', 'z']:
@@ -139,12 +143,153 @@ class analyzer:
             plt.ylabel(r'permitivity')
             plt.title('Real and Imag permitivity \nreconstructed from binary data \n(projected on k and on bands)', fontdict={'size':8})
             plt.legend()
-            plt.savefig('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/results/figures/eps(reconstructed).png')
+            plt.savefig('./results/figures/eps(reconstructed).png')
 
         return epsi, epsr, epsi_intra, epsr_intra 
 
+    def recover_summed_eps_proj(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans,
+                            k_eps_x_intra, k_eps_y_intra, k_eps_z_intra,
+                            proj_dataframes_dict, proj_header, plot=True, metalCalc=True):
+        intersmear = 0.1360
+        intrasmear = 0.1360
+        nproj = len(proj_header[6:-1])
+        cor = 1e-6
+        k_eps = [k_eps_x, k_eps_y, k_eps_z]
+        k_eps_intra = [k_eps_x_intra, k_eps_y_intra, k_eps_z_intra]
+        epsi_dir_proj = np.zeros((3, nproj, nw))
+        epsr_dir_proj = np.zeros((3, nproj, nw))
+        epsi_dir = np.zeros((3, nw))
+        epsr_dir = np.zeros((3, nw))
+        for id, dir in enumerate(['x', 'y', 'z']):
+            self.logger.info(f'Running over direction {dir}')
+            nkstot = self.nkstot
+            nbnd = self.nbnd
+            # Prepare masks and indices for iband1 != iband2
+            iband_mask = ~np.eye(nbnd, dtype=bool)
+            iband1_indices, iband2_indices = np.where(iband_mask)
+            n_pairs = len(iband1_indices)
+            # Extract relevant slices
+            k_eps_id = k_eps[id]
+            etrans_masked = etrans[:, iband1_indices, iband2_indices]
+            k_eps_masked = k_eps_id[:, iband1_indices, iband2_indices]
+            et2 = etrans_masked ** 2
+            # Expand dimensions for broadcasting
+            wgrid_exp = wgrid[np.newaxis, :, np.newaxis]
+            et2_exp = et2[:, np.newaxis, :]
+            # Calculate dif, denominator, numerator
+            w2 = wgrid_exp ** 2
+            dif = (et2_exp - w2) ** 2
+            denominator = (dif + intersmear ** 2 * w2) * etrans_masked[:, np.newaxis, :] + cor
+            numerator = et2_exp - w2
+            # Compute auxiliary arrays
+            aux_imag = k_eps_masked[:, np.newaxis, :] * intersmear * wgrid_exp / denominator
+            aux_real = k_eps_masked[:, np.newaxis, :] * numerator / denominator
+            # Sum over iband pairs to get epsi and epsr
+            epsi = np.sum(aux_imag, axis=-1)
+            epsr = np.sum(aux_real, axis=-1)
+            # Initialize epsi_ and epsr_
+            epsi_ = np.zeros((nkstot, nw, nbnd))
+            epsr_ = np.zeros((nkstot, nw, nbnd))
+            np.add.at(epsi_, (slice(None), slice(None), iband1_indices), aux_imag)
+            np.add.at(epsr_, (slice(None), slice(None), iband1_indices), aux_real)
+            if metalCalc:
+                k_eps_intra_id = k_eps_intra[id]
+                k_eps_intra_exp = k_eps_intra_id[:, np.newaxis, :]
+                denominator_intra = (w2 ** 2 + intrasmear ** 2 * w2) * self.degauss + cor
+                aux_imag_intra = k_eps_intra_exp * intrasmear * wgrid_exp / denominator_intra
+                aux_real_intra = k_eps_intra_exp * w2 / denominator_intra
+                epsi += np.sum(aux_imag_intra, axis=-1)
+                epsr -= np.sum(aux_real_intra, axis=-1)
+                epsi_ += aux_imag_intra
+                epsr_ -= aux_real_intra
+            epsi_proj = np.zeros((nkstot, nproj, nw))
+            epsr_proj = np.zeros((nkstot, nproj, nw))
+            for ia, atmwfc in enumerate(proj_header[6:-1]):
+                # Obtain projection data once per band
+                proj_data = []
+                for iband1 in range(nbnd):
+                    #filtered_proj, _ = self.get_atm_proj(iband1, proj_dataframes_dict, proj_header)
+                    filtered_proj, filtered_proj_header = self.get_atm_proj(iband1, proj_dataframes_dict, proj_header)
+                    proj = filtered_proj[:, ia] * filtered_proj[:, -1]
+                    proj_data.append(proj)
+                proj_data = np.array(proj_data).T  # Shape: (nkstot, nbnd)
+                # Multiply and sum over bands
+                epsi_proj[:, ia, :] = np.sum(epsi_ * proj_data[:, np.newaxis, :], axis=-1)
+                epsr_proj[:, ia, :] = np.sum(epsr_ * proj_data[:, np.newaxis, :], axis=-1)
+            # Sum over k-points
+            epsi_proj_sum = np.sum(epsi_proj, axis=0)
+            epsr_proj_sum = 1.0 + np.sum(epsr_proj, axis=0)
+            epsi_dir_proj[id, :, :] = epsi_proj_sum
+            epsr_dir_proj[id, :, :] = epsr_proj_sum
+            epsi_sum = np.sum(epsi, axis=0)
+            epsr_sum = 1.0 + np.sum(epsr, axis=0)
+            epsi_dir[id, :] = epsi_sum
+            epsr_dir[id, :] = epsr_sum
+
+        print('Dimensions')
+        print('espi', epsi.shape)
+        print('espr', epsr.shape)
+        print('epsi_proj', epsi_proj.shape)
+        print('epsr_proj', epsr_proj.shape)
+        
+
+        self.save2csv(wgrid, epsi_dir, filename='epsi.csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        self.save2csv(wgrid, epsr_dir, filename='epsr.csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+            
+        self.save2csv(wgrid,  epsi_dir_proj[0,:,:], filename=f'epsi(projected)_x.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsr_dir_proj[0,:,:], filename=f'epsr(projected)_x.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsi_dir_proj[1,:,:], filename=f'epsi(projected)_y.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsr_dir_proj[1,:,:], filename=f'epsr(projected)_y.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsi_dir_proj[2,:,:], filename=f'epsi(projected)_z.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsr_dir_proj[2,:,:], filename=f'epsr(projected)_z.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+            
+        #self.save2csv(wgrid, epsi_intra, filename='epsi_intra(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        #self.save2csv(wgrid, epsr_intra, filename='epsr_intra(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+
+
+        if plot:
+            print('Plotting results to figures')
+            plt.clf()
+            # Plot epsi_x and epsr_x
+            plt.plot(wgrid, epsi_dir[0, :], label='epsi_x')
+            plt.plot(wgrid, epsr_dir[0, :], label='epsr_x')
+            # Plot projections for each atomic wavefunction component
+            for ia, atmwfc in enumerate(proj_header[6:-1]):
+                plt.plot(wgrid, epsi_dir_proj[0, ia, :], label=f'epsi_x_{atmwfc}')
+                plt.plot(wgrid, epsr_dir_proj[0, ia, :], label=f'epsr_x_{atmwfc}')
+            # Sum over all projections to get total
+            epsi_proj_sum = np.sum(epsi_dir_proj[0, :, :], axis=0)
+            epsr_proj_sum = np.sum(epsr_dir_proj[0, :, :], axis=0)
+            plt.plot(wgrid, epsi_proj_sum, label='epsi_x_summed')
+            plt.plot(wgrid, epsr_proj_sum, label='epsr_x_summed')
+            plt.ylim([-1000, 200])
+            plt.xlim([0.01, 12])
+            plt.xlabel(r'$\hbar\omega$ (eV)')
+            plt.ylabel('Permittivity')
+            plt.title('Real and Imaginary Permittivity\nReconstructed from Binary Data\n(Before Projecting Over Bands)', fontsize=8)
+            plt.legend()
+            plt.savefig('./results/figures/eps(beforeprojection).png')
+
+            plt.clf()
+            plt.plot(wgrid,  np.sum(epsi[:],axis=0), label = f'epsi_x')
+            plt.plot(wgrid, np.sum(epsr[:],axis=0), label = f'epsr_x')
+            for id, dir in enumerate(['x', 'y', 'z']):
+                epsi_proj_sum = np.sum(epsi_dir_proj[id, :, :], axis=0)
+                epsr_proj_sum = np.sum(epsr_dir_proj[id, :, :], axis=0)
+                plt.plot(wgrid, epsi_proj_sum, label=f'epsi_{dir}_summed')
+                plt.plot(wgrid, epsr_proj_sum, label=f'epsr_{dir}_summed')
+            plt.ylim([-1000, 200])
+            plt.xlim([0.01, 12])
+            plt.xlabel(r'$\hbar\omega$ (eV)')
+            plt.ylabel('Permittivity')
+            plt.title('Real and Imaginary Permittivity\nReconstructed from Binary Data\n(Before Projecting Over Bands)', fontsize=8)
+            plt.legend()
+            plt.savefig('./results/figures/eps(proj_dir).png')
+
+        
+        return epsi, epsr, None, None
    
-    def recover_summed_eps_proj(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra\
+    def recover_summed_eps_proj_(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra\
                                 ,proj_dataframes_dict, proj_header, plot = True, metalCalc = True):
         intersmear = 0.1360
         intrasmear = 0.1360
@@ -273,7 +418,7 @@ class analyzer:
             plt.ylabel(r'permitivity')
             plt.title('Real and Imag permitivity \nreconstructed from binary data \n(before projecting over bands)', fontdict={'size':8})
             plt.legend()
-            plt.savefig('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/results/figures/eps(beforeprojection).png')
+            plt.savefig('./results/figures/eps(beforeprojection).png')
 
             plt.clf()
             plt.plot(wgrid, epsi[:], label = f'epsi_x')
@@ -287,7 +432,7 @@ class analyzer:
             plt.ylabel(r'permitivity')
             plt.title('Real and Imag permitivity \nreconstructed from binary data \n(before projecting over bands)', fontdict={'size':8})
             plt.legend()
-            plt.savefig('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/results/figures/eps(proj_dir).png')
+            plt.savefig('./results/figures/eps(proj_dir).png')
 
         
         return epsi, epsr, None, None
@@ -372,7 +517,7 @@ class analyzer:
             plt.ylabel(r'permitivity')
             plt.title('Real and Imag permitivity \nreconstructed from binary data \n(projected on k and on bands)', fontdict={'size':8})
             plt.legend()
-            plt.savefig('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/results/figures/eps(reconstructed_afterBands).png')
+            plt.savefig('./results/figures/eps(reconstructed_afterBands).png')
 
             plt.clf()
             for ia, atmwfc in enumerate(proj_header[6:-1]):
@@ -386,7 +531,7 @@ class analyzer:
             plt.ylabel(r'permitivity')
             plt.title('Real and Imag permitivity \nreconstructed from binary data \n(projected on k and on bands)', fontdict={'size':8})
             #plt.legend()
-            plt.savefig('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/results/figures/eps(projBands).png')
+            plt.savefig('./results/figures/eps(projBands).png')
 
         
         return epsi, epsr, epsi_intra, epsr_intra   
@@ -482,7 +627,7 @@ class analyzer:
         filtered_proj_header = proj_header[6:]
         return filtered_proj, filtered_proj_header   
 
-    def get_params(self, projWFCfilename = '/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/projWfc_files/al.projwfc.out') :
+    def get_params(self, projWFCfilename ) :
         with open(projWFCfilename, 'r') as f:
             lines = f.readlines()
 
@@ -500,9 +645,9 @@ class analyzer:
         self.logger.info(f'Problem sizes read from prokwfc.out: \n\tnatomwfc =  {natomwfc} \n\tnbnd =  {nbnd} \n\tnkstot =  {nkstot} \n\tdegauss = {degauss}')
         return {'natomwfc': natomwfc, 'nbnd': nbnd, 'nkstot': nkstot, 'degauss': degauss}
     
-    def run(self, plot = False):
+    def run(self, epsPath, plot = False):
         proj_dataframes_dict, proj_header = self.read_projections2dataframe() # returns a dictionary with the projection dataframes for each KS state-
-        nw, nbnd, nks, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra = self.read_eps()
+        nw, nbnd, nks, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra = self.read_eps(filesRoot=epsPath)
 
         filtered_proj_header = proj_header[6:]
     
@@ -548,47 +693,10 @@ if __name__ == '__main__':
 
     log_level = 'info'
     prefix = 'al'
-    projFilename = '/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/projectionFiles/structured_projection_dataframes.h5'
-    an = analyzer(projFilename = projFilename, log_level = log_level, prefix = prefix)
+    projFilename = '/scratch/abezerra/DFT/TransmissionDipole/Al/projectionFiles/structured_projection_dataframes.h5'
+    epsPath = '/scratch/abezerra/DFT/TransmissionDipole/Al/eps_files/'
+    projWFCfilename = '/scratch/abezerra/DFT/TransmissionDipole/Al/projWFC_files/Al.projwfc.out'
 
-    an.run()
+    an = analyzer(projFilename = projFilename, projWFCfilename= projWFCfilename, log_level = log_level, prefix = prefix)
 
-    '''proj_dataframes_dict, proj_header = an.read_projections2dataframe() # returns a dictionary with the projection dataframes for each KS state-
-    nw, nbnd, nks, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra = an.read_eps()
-  
-
-    filtered_proj_header = proj_header[6:]
-    
-    epsi, epsr, epsi_intra, epsr_intra = an.recover_summed_eps(nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra)
-    
-    epsi_proj, epsr_proj, epsi_proj_intra, epsr_proj_intra, \
-        epsi_total, epsr_total, epsi_intra, epsr_intra= an.atmwfc_projected_eps(nw, \
-                                                                                wgrid, etrans, k_eps_x, k_eps_x_intra, proj_dataframes_dict, proj_header)'''
-
-'''
-    for ic in range(len(filtered_proj_header)-1):
-        plt.plot(wgrid, epsi_proj[ic,:], label = f'epsi_{filtered_proj_header[ic]}')
-        plt.plot(wgrid, epsi_total, label = f'epsi_total')
-        plt.plot(wgrid, epsr_proj[ic,:], label = f'epsr_{filtered_proj_header[ic]}')
-        plt.plot(wgrid, epsr_total, label = f'epsr_total')
-    plt.ylim([-100,200])
-    plt.xlim([0.01,12])
-    plt.xlabel(r'$\hbar\omega$ (ev)')
-    plt.ylabel(r'permitivity')
-    plt.title(f'Real and Imag permitivity \n(projected onto atmwfc={filtered_proj_header[choose_projection]})', fontdict={'size':8})
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.0)
-    plt.savefig('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/results/figures/eps(projected).png')
-
-    plt.clf()
-    plt.plot(wgrid, epsi[0,:], label = f'epsi')
-    plt.plot(wgrid, epsi_total, label = f'epsi_projection')
-    plt.plot(wgrid, epsr[0,:], label = f'epsr')
-    plt.plot(wgrid, epsr_total, label = f'epsr_projection')
-    plt.ylim([-100,200])
-    plt.xlim([0.01,12])
-    plt.xlabel(r'$\hbar\omega$ (ev)')
-    plt.ylabel(r'permitivity')
-    plt.title(f'Real and Imag permitivity \n comparison of total and projected summed', fontdict={'size':8})
-    plt.legend()
-    plt.savefig('/home/anibal/scratch/DFT/ProjWFC/Al_4atoms/TransitionDipoleAnalyser/results/figures/eps(comparison).png')
-    '''
+    an.run(epsPath = epsPath)
