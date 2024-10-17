@@ -147,7 +147,7 @@ class analyzer:
 
         return epsi, epsr, epsi_intra, epsr_intra 
 
-    def recover_summed_eps_proj(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans,
+    def recover_summed_eps_proj_vectorized(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans,
                             k_eps_x_intra, k_eps_y_intra, k_eps_z_intra,
                             proj_dataframes_dict, proj_header, plot=True, metalCalc=True):
         intersmear = 0.1360
@@ -288,8 +288,176 @@ class analyzer:
 
         
         return epsi, epsr, None, None
-   
-    def recover_summed_eps_proj_(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra\
+    
+
+    def recover_summed_eps_proj_chunked(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans,
+                                       k_eps_x_intra, k_eps_y_intra, k_eps_z_intra,
+                                       proj_dataframes_dict, proj_header, plot=True, metalCalc=True):
+        intersmear = 0.1360
+        intrasmear = 0.1360
+        nproj = len(proj_header[6:-1])
+        cor = 1e-6
+        k_eps = [k_eps_x, k_eps_y, k_eps_z]
+        k_eps_intra = [k_eps_x_intra, k_eps_y_intra, k_eps_z_intra]
+        epsi_dir_proj = np.zeros((3, nproj, nw))
+        epsr_dir_proj = np.zeros((3, nproj, nw))
+        epsi_dir = np.zeros((3, nw))
+        epsr_dir = np.zeros((3, nw))
+        nbnd = self.nbnd
+        nkstot = self.nkstot
+        # Define chunk size for splitting over iband1
+        chunk_size = 10  # Adjust this value based on available memory
+        for id, dir in enumerate(['x', 'y', 'z']):
+            self.logger.info(f'Running over direction {dir}')
+            # Initialize accumulators
+            epsi = np.zeros((nkstot, nw))
+            epsr = np.zeros((nkstot, nw))
+            epsi_ = np.zeros((nkstot, nw, nbnd))
+            epsr_ = np.zeros((nkstot, nw, nbnd))
+            # Process iband1 in chunks
+            for iband1_start in range(0, nbnd, chunk_size):
+                iband1_end = min(iband1_start + chunk_size, nbnd)
+                iband1_range = np.arange(iband1_start, iband1_end)
+                # Prepare masks and indices for iband1 != iband2 within the chunk
+                iband_mask_chunk = np.ones((len(iband1_range), nbnd), dtype=bool)
+                np.fill_diagonal(iband_mask_chunk[:, iband1_start:iband1_end], False)
+                iband1_indices_chunk, iband2_indices_chunk = np.where(iband_mask_chunk)
+                iband1_indices_chunk += iband1_start
+                # Extract relevant slices
+                k_eps_id = k_eps[id]
+                etrans_masked = etrans[:, iband1_indices_chunk, iband2_indices_chunk]
+                k_eps_masked = k_eps_id[:, iband1_indices_chunk, iband2_indices_chunk]
+                et2 = etrans_masked ** 2
+                # Expand dimensions for broadcasting
+                wgrid_exp = wgrid[np.newaxis, :, np.newaxis]
+                et2_exp = et2[:, np.newaxis, :]
+                # Calculate dif, denominator, numerator
+                w2 = wgrid_exp ** 2
+                dif = (et2_exp - w2) ** 2
+                denominator = (dif + intersmear ** 2 * w2) * etrans_masked[:, np.newaxis, :] + cor
+                numerator = et2_exp - w2
+                # Compute auxiliary arrays
+                aux_imag = k_eps_masked[:, np.newaxis, :] * intersmear * wgrid_exp / denominator
+                aux_real = k_eps_masked[:, np.newaxis, :] * numerator / denominator
+                # Sum over iband pairs to get epsi and epsr
+                epsi += np.sum(aux_imag, axis=-1)
+                epsr += np.sum(aux_real, axis=-1)
+                # Accumulate into epsi_ and epsr_
+                for idx, ib1 in enumerate(iband1_indices_chunk):
+                    epsi_[:, :, ib1] += aux_imag[:, :, idx]
+                    epsr_[:, :, ib1] += aux_real[:, :, idx]
+            if metalCalc:
+                # Process intra-band contributions in chunks
+                for iband1_start in range(0, nbnd, chunk_size):
+                    iband1_end = min(iband1_start + chunk_size, nbnd)
+                    iband1_range = np.arange(iband1_start, iband1_end)
+                    k_eps_intra_id = k_eps_intra[id][:, iband1_range]
+                    # Expand dimensions for broadcasting
+                    k_eps_intra_exp = k_eps_intra_id[:, np.newaxis, :]
+                    w2 = wgrid[np.newaxis, :, np.newaxis] ** 2
+                    denominator_intra = (w2 ** 2 + intrasmear ** 2 * w2) * self.degauss + cor
+                    aux_imag_intra = k_eps_intra_exp * intrasmear * wgrid[np.newaxis, :, np.newaxis] / denominator_intra
+                    aux_real_intra = k_eps_intra_exp * w2 / denominator_intra
+                    epsi += np.sum(aux_imag_intra, axis=-1)
+                    epsr -= np.sum(aux_real_intra, axis=-1)
+                    epsi_[:, :, iband1_range] += aux_imag_intra
+                    epsr_[:, :, iband1_range] -= aux_real_intra
+            # Initialize epsi_proj and epsr_proj
+            epsi_proj = np.zeros((nkstot, nproj, nw))
+            epsr_proj = np.zeros((nkstot, nproj, nw))
+            # Process projections in chunks over bands
+            for iband1_start in range(0, nbnd, chunk_size):
+                iband1_end = min(iband1_start + chunk_size, nbnd)
+                iband1_range = np.arange(iband1_start, iband1_end)
+                # Collect projection data for the chunk
+                proj_data_chunk = []
+                for iband1 in iband1_range:
+                    filtered_proj, filtered_proj_header = self.get_atm_proj(iband1, proj_dataframes_dict, proj_header)
+                    proj = filtered_proj[:, :-1] * filtered_proj[:, -1][:, np.newaxis]  # Shape: (nkstot, nproj)
+                    proj_data_chunk.append(proj)
+                # Stack and transpose proj_data_chunk
+                proj_data_chunk = np.stack(proj_data_chunk, axis=2)  # Shape: (nkstot, nproj, chunk_size)
+                proj_data_chunk = proj_data_chunk.transpose(0, 2, 1)  # Shape: (nkstot, chunk_size, nproj)
+                # Extract epsi_chunk and epsr_chunk
+                epsi_chunk = epsi_[:, :, iband1_range]  # Shape: (nkstot, nw, chunk_size)
+                epsr_chunk = epsr_[:, :, iband1_range]
+                # Multiply and sum over bands within the chunk
+                # epsi_chunk: (nkstot, nw, chunk_size)
+                # proj_data_chunk: (nkstot, chunk_size, nproj)
+                # We need to align the chunk_size axis for multiplication
+                # Use einsum to multiply and sum over chunk_size
+                epsi_proj_chunk = np.einsum('knc,kcp->knp', epsi_chunk, proj_data_chunk)  # Shape: (nkstot, nw, nproj)
+                epsr_proj_chunk = np.einsum('knc,kcp->knp', epsr_chunk, proj_data_chunk)
+                # Transpose to match epsi_proj's shape (nkstot, nproj, nw)
+                epsi_proj += epsi_proj_chunk.transpose(0, 2, 1)
+                epsr_proj += epsr_proj_chunk.transpose(0, 2, 1)
+            # Sum over k-points
+            epsi_proj_sum = np.sum(epsi_proj, axis=0)
+            epsr_proj_sum = 1.0 + np.sum(epsr_proj, axis=0)
+            epsi_dir_proj[id, :, :] = epsi_proj_sum
+            epsr_dir_proj[id, :, :] = epsr_proj_sum
+            epsi_sum = np.sum(epsi, axis=0)
+            epsr_sum = 1.0 + np.sum(epsr, axis=0)
+            epsi_dir[id, :] = epsi_sum
+            epsr_dir[id, :] = epsr_sum
+
+        self.save2csv(wgrid, epsi_dir, filename='epsi.csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        self.save2csv(wgrid, epsr_dir, filename='epsr.csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+            
+        self.save2csv(wgrid,  epsi_dir_proj[0,:,:], filename=f'epsi(projected)_x.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsr_dir_proj[0,:,:], filename=f'epsr(projected)_x.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsi_dir_proj[1,:,:], filename=f'epsi(projected)_y.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsr_dir_proj[1,:,:], filename=f'epsr(projected)_y.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsi_dir_proj[2,:,:], filename=f'epsi(projected)_z.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+        self.save2csv(wgrid,  epsr_dir_proj[2,:,:], filename=f'epsr(projected)_z.csv', directory = './results/csv', transpose=True,  columns=filtered_proj_header[:-1])
+            
+        #self.save2csv(wgrid, epsi_intra, filename='epsi_intra(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+        #self.save2csv(wgrid, epsr_intra, filename='epsr_intra(fromBinary).csv', directory = './results/csv', transpose=True,  columns=['epsi_x','epsi_y','epsi_z'])
+
+
+        if plot:
+            print('Plotting results to figures')
+            plt.clf()
+            # Plot epsi_x and epsr_x
+            plt.plot(wgrid, epsi_dir[0, :], label='epsi_x')
+            plt.plot(wgrid, epsr_dir[0, :], label='epsr_x')
+            # Plot projections for each atomic wavefunction component
+            for ia, atmwfc in enumerate(proj_header[6:-1]):
+                plt.plot(wgrid, epsi_dir_proj[0, ia, :], label=f'epsi_x_{atmwfc}')
+                plt.plot(wgrid, epsr_dir_proj[0, ia, :], label=f'epsr_x_{atmwfc}')
+            # Sum over all projections to get total
+            epsi_proj_sum = np.sum(epsi_dir_proj[0, :, :], axis=0)
+            epsr_proj_sum = np.sum(epsr_dir_proj[0, :, :], axis=0)
+            plt.plot(wgrid, epsi_proj_sum, label='epsi_x_summed')
+            plt.plot(wgrid, epsr_proj_sum, label='epsr_x_summed')
+            plt.ylim([-1000, 200])
+            plt.xlim([0.01, 12])
+            plt.xlabel(r'$\hbar\omega$ (eV)')
+            plt.ylabel('Permittivity')
+            plt.title('Real and Imaginary Permittivity\nReconstructed from Binary Data\n(Before Projecting Over Bands)', fontsize=8)
+            plt.legend()
+            plt.savefig('./results/figures/eps(beforeprojection).png')
+
+            plt.clf()
+            plt.plot(wgrid,  np.sum(epsi[:],axis=0), label = f'epsi_x')
+            plt.plot(wgrid, np.sum(epsr[:],axis=0), label = f'epsr_x')
+            for id, dir in enumerate(['x', 'y', 'z']):
+                epsi_proj_sum = np.sum(epsi_dir_proj[id, :, :], axis=0)
+                epsr_proj_sum = np.sum(epsr_dir_proj[id, :, :], axis=0)
+                plt.plot(wgrid, epsi_proj_sum, label=f'epsi_{dir}_summed')
+                plt.plot(wgrid, epsr_proj_sum, label=f'epsr_{dir}_summed')
+            plt.ylim([-1000, 200])
+            plt.xlim([0.01, 12])
+            plt.xlabel(r'$\hbar\omega$ (eV)')
+            plt.ylabel('Permittivity')
+            plt.title('Real and Imaginary Permittivity\nReconstructed from Binary Data\n(Before Projecting Over Bands)', fontsize=8)
+            plt.legend()
+            plt.savefig('./results/figures/eps(proj_dir).png')
+
+        return epsi_dir, epsr_dir, epsi_dir_proj, epsr_dir_proj
+
+
+    def recover_summed_eps_proj_nested(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra\
                                 ,proj_dataframes_dict, proj_header, plot = True, metalCalc = True):
         intersmear = 0.1360
         intrasmear = 0.1360
@@ -657,8 +825,9 @@ class analyzer:
         #    epsi_total, epsr_total, epsi_intra, epsr_intra= an.atmwfc_projected_eps(nw, \
          #                                                                       wgrid, etrans, k_eps_x, k_eps_x_intra, proj_dataframes_dict, proj_header)
         
-        epsi_proj, epsr_proj, epsi_intra, epsr_intra = an.recover_summed_eps_proj(nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra\
+        epsi_proj, epsr_proj, epsi_intra, epsr_intra = an.recover_summed_eps_proj_chunked(nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra\
                                 ,proj_dataframes_dict, proj_header, plot = True)
+
         
         if plot:
             plt.clf()
