@@ -10,8 +10,6 @@ Welcome to Transition Dipole Explorer Documentation
    :maxdepth: 2
    :caption: Contents:
 
-   installation
-   usage
    coloredLogger
    openBin
    projParser
