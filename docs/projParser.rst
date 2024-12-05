@@ -1,4 +1,6 @@
 .. _projParser:
+
+projParser Module
 ========
 
 .. automodule:: src.projParser
