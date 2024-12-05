@@ -12,7 +12,11 @@ Welcome to Transition Dipole Explorer Documentation
 
    installation
    usage
-   modules
+   coloredLogger
+   openBin
+   projParser
+   projectionAnalyzer
+
 
 Indices and tables
 ==================
