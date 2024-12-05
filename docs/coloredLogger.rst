@@ -1,4 +1,4 @@
-coloredLogger
+.. _coloredLogger
 ========
 
 .. automodule:: src.coloredLogger
