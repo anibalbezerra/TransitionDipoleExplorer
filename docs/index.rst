@@ -10,6 +10,8 @@ Welcome to Transition Dipole Explorer Documentation
    :maxdepth: 2
    :caption: Contents:
 
+   installation
+   usage
    modules
 
 Indices and tables
