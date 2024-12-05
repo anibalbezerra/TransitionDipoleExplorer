@@ -1,4 +1,4 @@
-.. _openBin
+.. _openBin:
 ========
 
 .. automodule:: src.openBin
