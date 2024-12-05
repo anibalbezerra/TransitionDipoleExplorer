@@ -1,3 +1,7 @@
+"""
+Module for opening binary files and processing their content.
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 from coloredLogger import color_log as logger
