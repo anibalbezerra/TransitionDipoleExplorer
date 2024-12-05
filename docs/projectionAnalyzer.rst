@@ -1,4 +1,6 @@
 : _projectionAnalyzer:
+
+projectionAnalyzer Module
 ========
 
 .. automodule:: src.projectionAnalyzer
