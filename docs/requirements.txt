@@ -4,6 +4,5 @@ numpy
 scipy
 matplotlib
 pandas
-multiprocessing
 colorlog
 
