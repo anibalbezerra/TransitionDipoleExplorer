@@ -9,7 +9,6 @@ import multiprocessing as mp
 import os
 
 class analyzer:
-    s analyzer:
     """
     A class for analyzing projection data and calculating permittivity from WFC calculations.
 
@@ -380,7 +379,7 @@ class analyzer:
     def recover_summed_eps_proj_chunked(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans,
                                        k_eps_x_intra, k_eps_y_intra, k_eps_z_intra,
                                        proj_dataframes_dict, proj_header, plot=True, metalCalc=True):
-                                       """
+        """
         Recovers the summed permittivity with projections in a vectorized and chunked manner.
 
         Args:
@@ -401,6 +400,7 @@ class analyzer:
         Returns:
             tuple: A tuple containing the recovered epsilon data.
         """
+
         intersmear = 0.1360
         intrasmear = 0.1360
         nproj = len(proj_header[6:-1])

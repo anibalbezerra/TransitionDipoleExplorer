@@ -10,7 +10,6 @@ Welcome to the Documentation
    projectionAnalyzer
    openBin
    projParser
-   __init__
    coloredLogger
 
 Indices and tables

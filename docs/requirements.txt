@@ -1,8 +1,11 @@
 sphinx
 sphinx-pdj-theme
-numpy
-scipy
-matplotlib
-pandas
+projParser
 colorlog
-
+numpy
+matplotlib
+time
+pandas
+coloredLogger
+openBin
+logging
