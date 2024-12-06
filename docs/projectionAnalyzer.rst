@@ -8,3 +8,8 @@ projectionAnalyzer
    :undoc-members:
    :show-inheritance:
 
+.. autoclass:: projectionAnalyzer.py.analyzer:
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
