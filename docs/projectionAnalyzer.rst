@@ -3,12 +3,12 @@
 projectionAnalyzer
 ==================
 
-.. automodule:: projectionAnalyzer
+.. automodule:: src.projectionAnalyzer
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. autoclass:: projectionAnalyzer.analyzer:
+.. autoclass:: src.projectionAnalyzer.analyzer:
    :members:
    :undoc-members:
    :show-inheritance:

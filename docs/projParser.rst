@@ -3,12 +3,12 @@
 projParser
 ==========
 
-.. automodule:: projParser
+.. automodule:: src.projParser
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. autoclass:: projParser.projWFC_parser:
+.. autoclass:: src.projParser.projWFC_parser:
    :members:
    :undoc-members:
    :show-inheritance:
