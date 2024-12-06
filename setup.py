@@ -5,11 +5,10 @@ setup(
     version='0.1',
     packages=find_packages(),
     install_requires=[
-        'colorlog',
         'numpy',
+        'logging',
         'matplotlib',
         'pandas',
-        'logging',
     ],
     entry_points={
         'console_scripts': [
