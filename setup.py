@@ -15,7 +15,7 @@ setup(
         'colorlog'
         're'
         'math'
-time
+        'time'
     ],
     entry_points={
         'console_scripts': [
