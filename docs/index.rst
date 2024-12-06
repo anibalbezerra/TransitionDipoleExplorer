@@ -1,3 +1,6 @@
+Transition Dipole Explorer
+============================
+
 Welcome to the Documentation
 ============================
 

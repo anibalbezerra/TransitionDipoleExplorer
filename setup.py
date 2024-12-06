@@ -6,8 +6,9 @@ setup(
     packages=find_packages(),
     install_requires=[
         'numpy',
-        'matplotlib',
         'pandas',
+        'time',
+        'matplotlib',
     ],
     entry_points={
         'console_scripts': [
