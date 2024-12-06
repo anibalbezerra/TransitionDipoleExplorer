@@ -2,9 +2,9 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath('../src'))
 
-project = 'Transition Dipole Analyser'
-copyright = '2024, Anibal Thiago Bezerra'
-author = 'Anibal Thiago Bezerra'
+project = 'TransitionDipoleExplorer'
+copyright = '2024, Anibal T Bezerra'
+author = 'Anibal T Bezerra'
 
 extensions = ['sphinx.ext.autodoc']
 

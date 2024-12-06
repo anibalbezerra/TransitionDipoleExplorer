@@ -1,4 +1,4 @@
-Welcome to the Documentation
+Welcome to the TransitionDipoleExplorer Documentation
 ============================
 
 .. toctree::
@@ -7,5 +7,4 @@ Welcome to the Documentation
    projectionAnalyzer
    openBin
    projParser
-   __init__
    coloredLogger
