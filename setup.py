@@ -5,14 +5,10 @@ setup(
     version='0.1',
     packages=find_packages(),
     install_requires=[
-        'projParser',
         'colorlog',
         'numpy',
         'matplotlib',
-        'time',
         'pandas',
-        'coloredLogger',
-        'openBin',
         'logging',
     ],
     entry_points={
