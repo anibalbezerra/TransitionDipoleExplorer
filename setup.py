@@ -7,7 +7,6 @@ setup(
     install_requires=[
         'numpy',
         'pandas',
-        'time',
         'matplotlib',
     ],
     entry_points={
