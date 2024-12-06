@@ -1,9 +1,6 @@
 Transition Dipole Explorer
 ============================
 
-Welcome to the Documentation
-============================
-
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
