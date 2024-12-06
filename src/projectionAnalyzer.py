@@ -9,8 +9,31 @@ import multiprocessing as mp
 import os
 
 class analyzer:
+    s analyzer:
+    """
+    A class for analyzing projection data and calculating permittivity from WFC calculations.
 
+    Attributes:
+        log_level (str): The logging level for the logger.
+        projFilename (str): The name of the projection file.
+        projWFCfilename (str): The name of the projWFC output file.
+        prefix (str): Prefix for the files.
+        logger (logging.Logger): Logger instance for logging messages.
+        natomwfc (int): Number of atomic wavefunctions.
+        nbnd (int): Number of bands.
+        nkstot (int): Total number of k-points.
+        degauss (float): Gaussian broadening parameter.
+    """
     def __init__(self, projFilename, projWFCfilename, log_level = 'info', prefix = 'al') -> None:
+        """
+        Initializes the analyzer class.
+
+        Args:
+            projFilename (str): The name of the projection file.
+            projWFCfilename (str): The name of the projWFC output file.
+            log_level (str): The logging level for the logger.
+            prefix (str): Prefix for the files.
+        """
         self.log_level = log_level
         self.projFilename = projFilename
         self.projWFCfilename = projWFCfilename
@@ -29,6 +52,12 @@ class analyzer:
 
 
     def read_projections2dataframe(self):
+        """
+        Reads projection data and converts it into a dictionary of DataFrames.
+
+        Returns:
+            tuple: A tuple containing a dictionary of DataFrames and the projection header.
+        """
         self.projData = parseProj(filename=None, log_level=self.log_level)._read_structured_projection_dataframe(self.projFilename)
 
         dataframes = {}
@@ -44,6 +73,15 @@ class analyzer:
         return dataframes, header
     
     def read_eps(self, filesRoot):
+        """
+        Reads epsilon binary files and returns the parsed data.
+
+        Args:
+            filesRoot (str): The root path of the epsilon binary files.
+
+        Returns:
+            tuple: A tuple containing the parsed data.
+        """
         self.eps_bin_parser = parseEps(log_level = self.log_level) #parser for binaries files containing eps data
         
         for dir in ['x', 'y', 'z']:
@@ -78,6 +116,16 @@ class analyzer:
             return nw, nbnd, nks, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra
 
     def problems_sizes_sanity_check(self, nbnd, nks):
+        """
+        Performs a sanity check on the problem sizes.
+
+        Args:
+            nbnd (int): Number of bands.
+            nks (int): Number of k-points.
+
+        Returns:
+            bool: True if the sanity check passes, False otherwise.
+        """
         if nbnd == self.nbnd and nks == self.nkstot:
             self.logger.info('Problem sizes sanity check passed!')
             return True
@@ -86,6 +134,24 @@ class analyzer:
 
 
     def recover_summed_eps(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans, k_eps_x_intra, k_eps_y_intra, k_eps_z_intra, plot = True):
+        """
+        Recovers the summed permittivity from the data read from binary files.
+
+        Args:
+            nw (int): Number of frequency points.
+            wgrid (numpy.ndarray): Frequency grid.
+            k_eps_x (numpy.ndarray): Epsilon data for x-direction.
+            k_eps_y (numpy.ndarray): Epsilon data for y-direction.
+            k_eps_z (numpy.ndarray): Epsilon data for z-direction.
+            etrans (numpy.ndarray): Energy transition data.
+            k_eps_x_intra (numpy.ndarray): Intra-band epsilon data for x-direction.
+            k_eps_y_intra (numpy.ndarray): Intra-band epsilon data for y-direction.
+            k_eps_z_intra (numpy.ndarray): Intra-band epsilon data for z-direction.
+            plot (bool): Whether to plot the results.
+
+        Returns:
+            tuple: A tuple containing the recovered epsilon data.
+        """
         self.logger.info(f'Evaluating eps from data read from binary files')
         intersmear = 0.1360
         intrasmear = 0.1360
@@ -150,6 +216,27 @@ class analyzer:
     def recover_summed_eps_proj_vectorized(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans,
                             k_eps_x_intra, k_eps_y_intra, k_eps_z_intra,
                             proj_dataframes_dict, proj_header, plot=True, metalCalc=True):
+        """
+        Recovers the summed permittivity with projections in a vectorized manner.
+
+        Args:
+            nw (int): Number of frequency points.
+            wgrid (numpy.ndarray): Frequency grid.
+            k_eps_x (numpy.ndarray): Epsilon data for x-direction.
+            k_eps_y (numpy.ndarray): Epsilon data for y-direction.
+            k_eps_z (numpy.ndarray): Epsilon data for z-direction.
+            etrans (numpy.ndarray): Energy transition data.
+            k_eps_x_intra (numpy.ndarray): Intra-band epsilon data for x-direction.
+            k_eps_y_intra (numpy.ndarray): Intra-band epsilon data for y-direction.
+            k_eps_z_intra (numpy.ndarray): Intra-band epsilon data for z-direction.
+            proj_dataframes_dict (dict): Dictionary of projection DataFrames.
+            proj_header (list): Projection header.
+            plot (bool): Whether to plot the results.
+            metalCalc (bool): Whether to include metal calculations.
+
+        Returns:
+            tuple: A tuple containing the recovered epsilon data.
+        """
         intersmear = 0.1360
         intrasmear = 0.1360
         nproj = len(proj_header[6:-1])
@@ -293,6 +380,27 @@ class analyzer:
     def recover_summed_eps_proj_chunked(self, nw, wgrid, k_eps_x, k_eps_y, k_eps_z, etrans,
                                        k_eps_x_intra, k_eps_y_intra, k_eps_z_intra,
                                        proj_dataframes_dict, proj_header, plot=True, metalCalc=True):
+                                       """
+        Recovers the summed permittivity with projections in a vectorized and chunked manner.
+
+        Args:
+            nw (int): Number of frequency points.
+            wgrid (numpy.ndarray): Frequency grid.
+            k_eps_x (numpy.ndarray): Epsilon data for x-direction.
+            k_eps_y (numpy.ndarray): Epsilon data for y-direction.
+            k_eps_z (numpy.ndarray): Epsilon data for z-direction.
+            etrans (numpy.ndarray): Energy transition data.
+            k_eps_x_intra (numpy.ndarray): Intra-band epsilon data for x-direction.
+            k_eps_y_intra (numpy.ndarray): Intra-band epsilon data for y-direction.
+            k_eps_z_intra (numpy.ndarray): Intra-band epsilon data for z-direction.
+            proj_dataframes_dict (dict): Dictionary of projection DataFrames.
+            proj_header (list): Projection header.
+            plot (bool): Whether to plot the results.
+            metalCalc (bool): Whether to include metal calculations.
+
+        Returns:
+            tuple: A tuple containing the recovered epsilon data.
+        """
         intersmear = 0.1360
         intrasmear = 0.1360
         nproj = len(proj_header[6:-1])
