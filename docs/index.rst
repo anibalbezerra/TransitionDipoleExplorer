@@ -5,6 +5,8 @@ Welcome to the Documentation
    :maxdepth: 2
    :caption: Contents:
 
+   README
+
    projectionAnalyzer
    openBin
    projParser

@@ -2,7 +2,7 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath('../src'))
 
-project = '{Transmission Dipole Analyser}'
+project = 'Transition Dipole Explorer'
 copyright = '2024, Anibal T Bezerra'
 author = 'Anibal T Bezerra'
 
