@@ -3,7 +3,7 @@
 __init__
 ========
 
-.. automodule:: __init__.py
+.. automodule:: __init__
    :members:
    :undoc-members:
    :show-inheritance:
