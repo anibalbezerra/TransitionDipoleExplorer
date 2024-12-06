@@ -8,7 +8,6 @@ setup(
         'numpy',
         'matplotlib',
         'pandas',
-        'logging',
     ],
     entry_points={
         'console_scripts': [

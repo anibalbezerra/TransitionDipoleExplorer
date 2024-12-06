@@ -1,7 +1,6 @@
 sphinx
 sphinx-pdj-theme
 numpy
-logging
 colorlog
 matplotlib
 pandas
