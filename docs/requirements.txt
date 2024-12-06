@@ -1,11 +1,8 @@
 sphinx
 sphinx-pdj-theme
-coloredLogger
 numpy
 logging
-time
 colorlog
 matplotlib
 pandas
-openBin
-projParser
+
