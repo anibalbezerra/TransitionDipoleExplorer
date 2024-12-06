@@ -24,6 +24,6 @@ napoleon_use_ivar = False
 napoleon_use_param = True
 napoleon_use_rtype = True
 
-html_theme = 'sphinx_rtd_theme'
+html_theme = 'sphinx_pdj_theme'
 
 html_static_path = ['_static']
