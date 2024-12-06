@@ -7,7 +7,23 @@ import time
 from coloredLogger import color_log 
 
 class projWFC_parser:
+    """
+    A class for parsing and analyzing projection data from WFC calculations.
+
+    Attributes:
+        logger (logging.Logger): Logger instance for logging messages.
+        filename (str): The name of the file to parse.
+        projections (dict): Dictionary containing parsed atomic projection data.
+        atomic_orbitals (list): List of atomic orbitals.
+    """
     def __init__(self, filename, log_level) -> None:
+        """
+        Initializes the projWFC_parser class.
+
+        Args:
+            filename (str): The name of the file to parse.
+            log_level (int): The logging level for the logger.
+        """
         self.logger = color_log(log_level).logger # defining logger to print code info during running 
         self.filename = filename
 
@@ -21,6 +37,15 @@ class projWFC_parser:
 
 
     def timming(func):
+        """
+        A decorator to time the execution of a function.
+
+        Args:
+            func (callable): The function to be timed.
+
+        Returns:
+            callable: The wrapped function.
+        """
         def wrapper(*args, **kwargs):
             start_time = time.perf_counter()  # Start the timer
             result = func(*args, **kwargs)    # Execute the function
@@ -31,6 +56,12 @@ class projWFC_parser:
         return wrapper 
 
     def parse_atomic_projections(self):
+        """
+        Parses the atomic projection information from the file.
+
+        Returns:
+            dict: Dictionary containing the parsed atomic projection data.
+        """
         self.logger.info('Parsing Atomic Orbitals projection information')
         orbital_map = {
             0: ['S'],
@@ -77,7 +108,15 @@ class projWFC_parser:
         return projections 
 
     def print_proj_info(self, projections):
+        """
+        Prints and returns the consolidated atomic orbitals gathered from the projections.
 
+        Args:
+            projections (dict): Dictionary containing the parsed atomic projection data.
+
+        Returns:
+            list: List of atomic orbitals.
+        """
         atomic_orbitals = []
         self.logger.info('Consolidated atomic orbitals gathered')
         for state, info in projections.items():
@@ -91,6 +130,21 @@ class projWFC_parser:
         return atomic_orbitals
 
     def numerology_sanity_test(self, nbnd, nkstot, e_lineNumber, k_lineNumber, psi2_000_lineNumber, psi2_lineNumber, psi_lineNumber):
+        """
+        Performs a sanity test on the numerology of the parsed data.
+
+        Args:
+            nbnd (int): Number of bands.
+            nkstot (int): Total number of k-points.
+            e_lineNumber (int): Number of energy lines.
+            k_lineNumber (int): Number of k-point lines.
+            psi2_000_lineNumber (int): Number of psi^2 = 0.00 lines.
+            psi2_lineNumber (int): Number of psi^2 lines.
+            psi_lineNumber (int): Number of psi lines.
+
+        Returns:
+            bool: True if the numerology test passes, False otherwise.
+        """
         if k_lineNumber == nkstot:
             self.logger.warning(f'Number of k points properly parsed') 
             if e_lineNumber == nkstot*nbnd:
@@ -104,6 +158,12 @@ class projWFC_parser:
     
 
     def parse_projwfc_output(self):
+        """
+        Parses the projwfc output file.
+
+        Returns:
+            list: List of tuples containing parsed data.
+        """
         with open(self.filename, 'r') as f:
             lines = f.readlines()
 
@@ -193,6 +253,15 @@ class projWFC_parser:
     
 
     def save_ks_states_individual(self, proj_data):
+        """
+        Saves the parsed KS states data to individual files.
+
+        Args:
+            proj_data (list): List of tuples containing parsed data.
+
+        Returns:
+            tuple: A tuple containing a dictionary of KS states and a list of DataFrames.
+        """
         self.logger.info('Creating directory to save projection files ')
         KS_proj_file_dir = "./projectionFiles"
 
@@ -256,6 +325,15 @@ class projWFC_parser:
         return ks_states, all_dataframes
     
     def _read_structured_projection_dataframe(self, filename):
+        """
+        Reads structured projection dataframes from an HDF5 file.
+
+        Args:
+            filename (str): The name of the HDF5 file to read.
+
+        Returns:
+            list: List of DataFrames.
+        """
         df_list = []
 
         with pd.HDFStore(filename, mode='r') as store:
@@ -272,6 +350,15 @@ class projWFC_parser:
 
     
     def sum_by_orbital(self, df):
+        """
+        Sums columns with the same atomic orbital projection (regardless of the principal quantum number).
+
+        Args:
+            df (pd.DataFrame): The DataFrame to process.
+
+        Returns:
+            pd.DataFrame: The processed DataFrame.
+        """
         grouped_df = df.T.groupby(level=0).sum()
         df = grouped_df.T
 
@@ -290,7 +377,12 @@ class projWFC_parser:
         return header
     
     def find_duplicate_indices(self):
-        """Finds the indices of duplicate names in a list of atomic states names. """
+        """
+        Finds the indices of duplicate names in a list of atomic states names.
+
+        Returns:
+            dict: Dictionary containing the indices of duplicate names.
+        """
         name_to_indices = {}
         for i, name in enumerate(self.atomic_orbitals):
             if name in name_to_indices:
@@ -302,6 +394,12 @@ class projWFC_parser:
 
     @timming
     def parse(self):
+        """
+        Parses the projwfc output file and saves the results.
+
+        Returns:
+            bool: True if parsing is successful.
+        """
         projections_data = parser.parse_projwfc_output()
         # returns a dictionary with split information for each KS state - keys are the nbnd KS states
         ks_states, listDataframe = parser.save_ks_states_individual(projections_data) 
