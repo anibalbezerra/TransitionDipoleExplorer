@@ -3,12 +3,12 @@
 openBin
 =======
 
-.. automodule:: openBin.py
+.. automodule:: openBin
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. autoclass:: openBin.py.parse_eps_binaries:
+.. autoclass:: openBin.parse_eps_binaries:
    :members:
    :undoc-members:
    :show-inheritance:

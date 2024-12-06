@@ -3,12 +3,12 @@
 coloredLogger
 =============
 
-.. automodule:: coloredLogger.py
+.. automodule:: coloredLogger
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. autoclass:: coloredLogger.py.color_log:
+.. autoclass:: coloredLogger.color_log:
    :members:
    :undoc-members:
    :show-inheritance:
