@@ -5,7 +5,17 @@ setup(
     version='0.1',
     packages=find_packages(),
     install_requires=[
-        # List your dependencies here
+        'numpy'
+        'scipy'
+        'matplotlib'
+        'pandas'
+        'multiprocessing'
+        'os'
+        'logging'
+        'colorlog'
+        're'
+        'math'
+time
     ],
     entry_points={
         'console_scripts': [
