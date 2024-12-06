@@ -1,2 +1,13 @@
 sphinx
 sphinx-rtd-theme
+numpy
+scipy
+matplotlib
+pandas
+multiprocessing
+os
+logging
+colorlog
+re
+math
+time
